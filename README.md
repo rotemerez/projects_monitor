@@ -25,6 +25,7 @@ A two-part system:
 
 | Doc | Purpose |
 |---|---|
+| [docs/TRAINEE_GUIDE.md](docs/TRAINEE_GUIDE.md) | **Start here** — full walkthrough of what the system does and how the pieces fit together |
 | [SETUP.md](SETUP.md) | Environment + how to run the pipeline and the scraper |
 | [next_steps.md](next_steps.md) | Live task tracking / roadmap |
 | [CLAUDE.md](CLAUDE.md) | Session notes, conventions, project history |

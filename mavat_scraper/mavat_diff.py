@@ -53,11 +53,19 @@ SESSION_RECYCLE = 250    # restart the browser context every N lookups
 TERMINAL_MAVAT_STATUSES = {"אישור", "נדחתה"}
 TERMINAL_VAULT_STAGES = {"approved"}
 
-# Transitions the user does not track manually in the vault, so they must not surface as
-# reportable changes either (user decision 2026-07-13). The snapshot is still updated
-# silently — so a later move e.g. בהליך אישור -> אישור is still correctly detected as a
-# change against the last REPORTED status, not against this suppressed intermediate one.
-IGNORED_NEW_STATUSES = {"בהליך אישור"}
+# Statuses worth reporting as a change AND writing to the vault (user decision
+# 2026-07-15, superseding the narrower 2026-07-13 IGNORED_NEW_STATUSES={"בהליך אישור"}
+# ad-hoc rule with a full whitelist). KEEP IN SYNC with TARGET_STATUSES in
+# mavat_discover.py — same 9 statuses govern discovery there and change-reporting here.
+# A transition to any OTHER status (עריכת תכנית תמ"א, הפצה למוזמנים, במילוי תנאים
+# להפקדה, הגשת/מילוי הערות והשגות, הכרעה בהתנגדויות/אישור, בהליך אישור, העברה לממשלה
+# לאישור) still updates the snapshot silently, so a LATER real move is diffed against the
+# true last REPORTED status, not this suppressed intermediate one — but it never becomes
+# a change record and is never offered for a vault write.
+MAVAT_TRACKED_STATUSES = {
+    "הכנת הודעה 77/78", "הכנת תכנית", "Pre-Ruling", "תסקיר סביבתי",
+    "בבדיקת תנאי סף", "בבדיקה תכנונית", "הפקדה להתנגדויות/השגות", "אישור", "נדחתה",
+}
 
 
 def load_tracked_plans():
@@ -107,6 +115,25 @@ def parse_quantities(detail):
     return units, quantities
 
 
+# Distinguishes a first-time deposit from a re-deposit of corrections under section 106(ב)
+# (found 2026-07-19, 503-1487552): Mavat's top-box status bucket (UNIFIED_STATUS_DESC) is
+# the same generic "הפקדה להתנגדויות/השגות" for both — the actual event only shows up in the
+# plan's own stage-history log (SV4 detail JSON, key "rsInternet"), one row per real-world
+# step (LIS_DESC + EIS_DATE). Not every plan goes through a 106(ב) cycle at all — most won't
+# have a matching row here, and that's the normal case, not a miss.
+SECTION_106B_RX = re.compile(r"106\s*\(?\s*ב\s*\)?'?")
+
+
+def find_status_detail(detail, status_date):
+    """Look up the rsInternet stage-history row matching status_date; if its own label
+    (LIS_DESC) mentions section 106(ב), return that exact label (e.g. distinguishing a
+    106(ב) re-deposit from an original deposit) — else None."""
+    for row in (detail or {}).get("rsInternet") or []:
+        if row.get("EIS_DATE") == status_date and SECTION_106B_RX.search(row.get("LIS_DESC") or ""):
+            return row["LIS_DESC"]
+    return None
+
+
 def open_state():
     con = sqlite3.connect(STATE_DB)
     con.execute("""CREATE TABLE IF NOT EXISTS mavat_status(
@@ -125,7 +152,8 @@ def open_state():
                 "ALTER TABLE mavat_changes ADD COLUMN old_units INTEGER",
                 "ALTER TABLE mavat_changes ADD COLUMN new_units INTEGER",
                 "ALTER TABLE mavat_changes ADD COLUMN approved INTEGER",
-                "ALTER TABLE mavat_changes ADD COLUMN applied_at TEXT"):
+                "ALTER TABLE mavat_changes ADD COLUMN applied_at TEXT",
+                "ALTER TABLE mavat_changes ADD COLUMN status_detail TEXT"):
         try:
             con.execute(ddl)
         except sqlite3.OperationalError:
@@ -274,23 +302,27 @@ def diff_and_store(state, results, plans, fetcher=None):
         # ignored transitions still update the snapshot (below) so a LATER real move is
         # diffed against the true last status, not this suppressed intermediate one —
         # but they never become a change record the user has to review
-        if changed and r.get("status_desc") in IGNORED_NEW_STATUSES:
+        if changed and r.get("status_desc") not in MAVAT_TRACKED_STATUSES:
             changed = False
         if changed:
             old_units = new_units = None
+            status_detail = None
             if fetcher and r.get("mid"):
                 detail = fetcher(r["mid"])
                 if detail:
                     old_units, new_units = store_details(state, plan, detail, now)
+                    status_detail = find_status_detail(detail, r.get("status_date"))
             changes.append({"plan": plan, "old_status": old_status, "old_date": old_date,
                             "new_status": r.get("status_desc"), "new_date": r.get("status_date"),
                             "old_units": old_units, "new_units": new_units,
+                            "status_detail": status_detail,
                             "ctx": plans.get(plan, {})})
             cur.execute("""INSERT INTO mavat_changes(plan, changed_at, old_status, old_date,
-                               new_status, new_date, old_units, new_units)
-                           VALUES(?,?,?,?,?,?,?,?)""",
+                               new_status, new_date, old_units, new_units, status_detail)
+                           VALUES(?,?,?,?,?,?,?,?,?)""",
                         (plan, now, old_status, old_date,
-                         r.get("status_desc"), r.get("status_date"), old_units, new_units))
+                         r.get("status_desc"), r.get("status_date"), old_units, new_units,
+                         status_detail))
         cur.execute("""UPDATE mavat_status SET matched=1, status_desc=?, status_code=?,
                            status_date=?, decision_date=?, update_date=?, mid=?, name=?,
                            last_checked=?, last_changed=COALESCE(?, last_changed), dormant=?
@@ -319,8 +351,9 @@ def write_report(path, changes, new_plans, misses, plans, checked_n, elapsed_s):
             ou, nu = ch.get("old_units"), ch.get("new_units")
             units = (f"{ou} → **{nu}**" if ou is not None and nu is not None and ou != nu
                      else (str(nu) if nu is not None else ""))
+            new_label = ch.get("status_detail") or ch["new_status"]
             lines.append(f"| {ch['plan']} | {proj} | {ch['old_status']} ({ch['old_date']}) "
-                         f"| **{ch['new_status']}** | {ch['new_date']} | {units} |")
+                         f"| **{new_label}** | {ch['new_date']} | {units} |")
         lines.append("")
         lines.append("לאישור/דחייה של עדכונים אל הכספת: `mavat_changes.html` (נוצר בכל ריצה).")
         lines.append("")
@@ -349,6 +382,15 @@ def main():
     args = ap.parse_args()
 
     plans = load_tracked_plans()
+    # Sanity backstop (2026-07-19): projects.db always has thousands of new-format plans.
+    # A suspiciously low count means we likely read it mid-rebuild (refresh_db.py's rebuild
+    # window, e.g. during a scheduled-task pile-up after the machine woke from sleep) rather
+    # than a real, near-empty vault. Fail loudly instead of silently "checking 0 plans" —
+    # that exact silent case caused a real status change (414-1294818) to sit undetected.
+    if len(plans) < 1000:
+        sys.exit(f"[FATAL] load_tracked_plans() returned only {len(plans)} plans — "
+                  f"projects.db looks incomplete (mid-rebuild?), refusing to run a diff "
+                  f"against it. Re-run once projects.db has settled.")
     state = open_state()
     active = select_active(state, plans, include_dormant=args.include_dormant)
 

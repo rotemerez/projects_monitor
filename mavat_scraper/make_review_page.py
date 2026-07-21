@@ -31,13 +31,24 @@ except Exception:
 HERE = Path(__file__).resolve().parent
 MAVAT_DB = HERE / "mavat_discovery.db"
 COMMITTEE_DB = HERE.parent / "committee_scraper" / "committee_state.db"
+STATE_DB = HERE / "mavat_state.db"
+PROJECTS_DB = HERE.parent / "projects.db"
 OUT = HERE / "mavat_review.html"
+
+# KEEP IN SYNC with mavat_discover.py:TARGET_STATUSES and mavat_diff.py:
+# MAVAT_TRACKED_STATUSES — same 9-status whitelist gates what shows up here too.
+MAVAT_TRACKED_STATUSES = {
+    "הכנת הודעה 77/78", "הכנת תכנית", "Pre-Ruling", "תסקיר סביבתי",
+    "בבדיקת תנאי סף", "בבדיקה תכנונית", "הפקדה להתנגדויות/השגות", "אישור", "נדחתה",
+}
 
 
 def load_mavat():
     con = sqlite3.connect(MAVAT_DB)
     for ddl in ("ALTER TABLE discovered ADD COLUMN kept INTEGER DEFAULT 0",
-                "ALTER TABLE discovered ADD COLUMN decided_at TEXT"):
+                "ALTER TABLE discovered ADD COLUMN decided_at TEXT",
+                "ALTER TABLE discovered ADD COLUMN vault_notice_seen INTEGER DEFAULT 0",
+                "ALTER TABLE discovered ADD COLUMN vault_notice_seen_at TEXT"):
         try:
             con.execute(ddl)
         except sqlite3.OperationalError:
@@ -45,10 +56,20 @@ def load_mavat():
     has_units = any(r[1] == "units_ge10"
                     for r in con.execute("PRAGMA table_info(discovered)"))
     units_col = ", COALESCE(units_ge10,0)" if has_units else ", 0"
+    # Excludes the one-time 2026-07-15 backlog cutover (~14.5k historical אישור/נדחתה rows
+    # that newly qualified when TARGET_STATUSES was widened to the 9-status whitelist) —
+    # pure migration noise, not a real decision worth keeping in the page's history tab.
+    # Bloated the payload to 12MB before this filter; see migrate_target_status.py.
+    # BUG (found 2026-07-16): `exclude_reason NOT LIKE '...'` evaluates to NULL — not
+    # true — for every never-excluded row (exclude_reason IS NULL), so SQLite silently
+    # dropped ALL genuinely open candidates, not just the backlog noise. The `IS NULL OR`
+    # is required; do not remove it.
     cur = con.execute(f"""SELECT plan, name, location, authority, status, status_date, url,
                                  excluded, exclude_reason, comment, first_seen,
                                  COALESCE(kept,0), decided_at{units_col}
                           FROM discovered WHERE target_status=1 AND in_vault=0
+                            AND (exclude_reason IS NULL
+                                 OR exclude_reason NOT LIKE 'אוטומטי: סטטוס נכלל לראשונה%')
                           ORDER BY status, location, plan""")
     rows = []
     for (plan, name, location, authority, status, status_date, url, excluded,
@@ -57,7 +78,26 @@ def load_mavat():
                      "authority": authority, "status": status, "status_date": status_date,
                      "url": url, "excluded": excluded, "exclude_reason": exclude_reason,
                      "comment": comment, "first_seen": first_seen, "kept": kept,
-                     "decided_at": decided_at, "units10": units10, "source": "mavat"})
+                     "decided_at": decided_at, "units10": units10, "source": "mavat",
+                     "kind": "candidate"})
+
+    # Vault-notice rows: plans already tracked in the vault (in_vault=1) that just showed
+    # up in the Mavat sweep — worth a look at the Mavat page itself (goals/quantities/PDFs
+    # are often richer than the committee source they were originally entered from), but
+    # not a keep/exclude decision since they're already tracked. One-time nudge: dismissed
+    # via vault_notice_seen instead of the kept/excluded flags (2026-07-15, user decision).
+    cur = con.execute("""SELECT plan, name, location, authority, status, status_date, url,
+                                first_seen
+                         FROM discovered
+                         WHERE target_status=1 AND in_vault=1
+                           AND COALESCE(vault_notice_seen,0)=0
+                         ORDER BY first_seen DESC""")
+    for plan, name, location, authority, status, status_date, url, first_seen in cur.fetchall():
+        rows.append({"plan": plan, "display_plan": plan, "name": name, "location": location,
+                     "authority": authority, "status": status, "status_date": status_date,
+                     "url": url, "excluded": 0, "exclude_reason": None, "comment": None,
+                     "first_seen": first_seen, "kept": 0, "decided_at": None, "units10": 0,
+                     "source": "mavat", "kind": "vault_notice"})
     con.close()
     return rows
 
@@ -80,12 +120,64 @@ def load_committee():
                      "status_date": status_date, "url": plan_link, "excluded": excluded,
                      "exclude_reason": exclude_reason, "comment": comment,
                      "first_seen": first_seen, "kept": kept, "decided_at": decided_at,
-                     "units10": 0, "source": "committee"})
+                     "units10": 0, "source": "committee", "kind": "candidate"})
     con.close()
     return rows
 
 
-data = load_mavat() + load_committee()
+def load_changes():
+    """Pending Mavat status/unit changes for vault-tracked plans (mavat_state.db), merged
+    into the same review page (2026-07-15, replaces mavat_changes.html). Only surfaced
+    when the plan's current/new status is in MAVAT_TRACKED_STATUSES — a units-only change
+    (status unchanged) is judged by the plan's current status_desc since it has no
+    new_status of its own. Keyed as 'chg::<id>' so it can never collide with a bare plan
+    number (mavat candidate/vault-notice) or a 'muni::plan' committee id."""
+    if not STATE_DB.exists():
+        return []
+    state = sqlite3.connect(STATE_DB)
+    cur = state.execute("""SELECT c.id, c.plan, c.changed_at, c.old_status, c.old_date,
+                                  c.new_status, c.new_date, c.old_units, c.new_units,
+                                  c.note, s.status_desc, c.status_detail
+                           FROM mavat_changes c LEFT JOIN mavat_status s ON s.plan = c.plan
+                           WHERE c.approved IS NULL
+                           ORDER BY c.changed_at DESC, c.plan""")
+    raw = cur.fetchall()
+    state.close()
+
+    proj = sqlite3.connect(PROJECTS_DB)
+    ctx = {}
+    for plan, city, name in proj.execute(
+            "SELECT plan_current, city, project_name FROM projects WHERE plan_current != ''"):
+        ctx.setdefault(str(plan).strip().replace(" ", ""), (city, name))
+    proj.close()
+
+    rows = []
+    for (cid, plan, changed_at, old_status, old_date, new_status, new_date,
+         old_units, new_units, note, cur_status_desc, status_detail) in raw:
+        effective_status = new_status or cur_status_desc
+        if effective_status not in MAVAT_TRACKED_STATUSES:
+            continue
+        city, name = ctx.get(plan, ("", ""))
+        # status_detail (2026-07-19): the plan's own stage-history label for this date, when
+        # it names a section-106(ב) re-deposit-after-corrections — distinguishes that from an
+        # original deposit, which Mavat's own status bucket doesn't (both show the same
+        # generic "הפקדה להתנגדויות/השגות"). None for the vast majority of changes that never
+        # go through a 106(ב) cycle.
+        rows.append({"plan": f"chg::{cid}", "display_plan": plan,
+                     "name": f"{city} / {name}".strip(" /") if (city or name) else plan,
+                     "location": city, "authority": "שינוי סטטוס", "status": new_status,
+                     "status_date": new_date, "old_status": old_status,
+                     "old_date": old_date, "old_units": old_units, "new_units": new_units,
+                     "note": note, "status_detail": status_detail,
+                     "url": "https://mavat.iplan.gov.il/SV3?searchEntity=1&entityType=1"
+                            "&searchMethod=2",
+                     "excluded": 0, "exclude_reason": None, "comment": None,
+                     "first_seen": changed_at, "kept": 0, "decided_at": None,
+                     "units10": 0, "source": "mavat", "kind": "status_change"})
+    return rows
+
+
+data = load_mavat() + load_committee() + load_changes()
 
 generated = datetime.now().strftime("%d/%m/%Y %H:%M")
 payload = json.dumps(data, ensure_ascii=False).replace("</", "<\\/")
@@ -121,9 +213,18 @@ html = """<!DOCTYPE html>
        vertical-align:top; }
   tr.excluded td { background:#fdf0ee; color:#8d6e68; }
   tr.kept td { background:#eefaf1; }
+  tr.vaultnotice td { background:#eaf3fc; }
+  tr.statuschange td { background:#f6f0fb; }
   a { color:var(--blue); text-decoration:none; }
   .u10 { display:inline-block; background:#e8f1fa; color:var(--blue); border-radius:10px;
          font-size:11px; padding:1px 7px; margin-inline-start:6px; }
+  .vn { display:inline-block; background:#dbeafc; color:var(--blue); border-radius:10px;
+        font-size:11px; padding:1px 7px; margin-inline-start:6px; font-weight:600; }
+  .chg { display:inline-block; background:#ecdffa; color:var(--purple); border-radius:10px;
+         font-size:11px; padding:1px 7px; margin-inline-start:6px; font-weight:600; }
+  .units { background:#e8f1fa; color:var(--blue); border-radius:10px; font-size:12px;
+       padding:1px 8px; display:inline-block; margin-top:3px; }
+  .arrow { color:var(--dim); }
   .src { display:inline-block; border-radius:10px; font-size:11px; padding:1px 7px;
          margin-inline-start:6px; background:#f1e9f7; color:var(--purple); }
   .btn { border:1px solid var(--line); background:#fff; border-radius:6px; padding:3px 10px;
@@ -153,6 +254,8 @@ html = """<!DOCTYPE html>
     <span class="chip" data-state="excluded">הוחרגו</span>
     <span class="chip" id="u10chip">10+ יח"ד</span>
     <span class="chip" id="newChip">חדשות מהסריקה האחרונה</span>
+    <span class="chip" id="vnChip">כבר בכספת — חדש במבא"ת</span>
+    <span class="chip" id="chgChip">שינויי סטטוס לאישור</span>
     <span class="chip" data-src="mavat">מבא"ת</span>
     <span class="chip" data-src="committee">ועדה מקומית</span>
     <button class="export" id="exportBtn">יצוא החלטות (JSON)</button>
@@ -178,11 +281,24 @@ const LSKEY = 'mavat_review_decisions_v1';
 const REASONS = ['תכנית נקודתית / בניין בודד','תשתיות / ניקוז / דרכים','שטח פתוח / חקלאי',
                  'מוסדות ציבור בלבד','לא רלוונטי גיאוגרפית','תכנית קטנה מדי','אחר'];
 let decisions = JSON.parse(localStorage.getItem(LSKEY) || '{}');
-// seed from DB state (decisions applied on previous rounds, incl. automatic rules)
+// seed from DB state (decisions applied on previous rounds, incl. automatic rules).
+// An AUTO-rule decision (reason starts "אוטומטי:") must never get stuck in the browser once
+// the underlying rule/data changes — found 2026-07-21 (502-1406529: auto-excluded, then
+// un-excluded server-side by a same-day rule fix + backlog reopen, but a browser that had
+// already loaded the page kept showing the stale cached "excluded" state indefinitely, since
+// seeding only ever ran once per plan). A genuine HUMAN decision (any other reason, or a
+// kept/rejected/approved state) is never touched here — only auto-tagged entries are
+// refreshed to match the current DB on every load.
 for (const r of DATA) {
-  if (r.excluded && !decisions[r.plan])
+  const cached = decisions[r.plan];
+  const cachedIsAuto = cached && cached.state === 'excluded'
+                      && (cached.reason || '').startsWith('אוטומטי:');
+  if (r.excluded && (!cached || cachedIsAuto)) {
     decisions[r.plan] = {state:'excluded', reason:r.exclude_reason||'', comment:r.comment||'',
                          ts:r.decided_at||''};
+  } else if (!r.excluded && cachedIsAuto) {
+    delete decisions[r.plan];
+  }
   if (r.kept && !decisions[r.plan])
     decisions[r.plan] = {state:'kept', reason:'', comment:r.comment||'', ts:r.decided_at||''};
 }
@@ -205,7 +321,7 @@ function isNew(r) {
   return fs === latestSeenBySource[r.source];
 }
 let stateFilter = 'open', statusFilter = null, q = '', u10only = false,
-    newOnly = false, sourceFilter = null;   // default view: open only
+    newOnly = false, sourceFilter = null, vnOnly = false, chgOnly = false;   // default view: open only
 
 function esc(s) {
   return String(s ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')
@@ -235,13 +351,23 @@ function fmtDate(ts) {
 function render() {
   const tbody = document.getElementById('rows');
   const ql = q.trim();
-  let kept = 0, excluded = 0, open = 0, newCount = 0;
+  let kept = 0, excluded = 0, open = 0, newCount = 0, vnPending = 0, chgPending = 0;
   const visible = [];
   for (const r of DATA) {
     const d = dec(r.plan);
-    if (d.state==='kept') kept++; else if (d.state==='excluded') excluded++; else open++;
-    if (isNew(r) && d.state==='open') newCount++;
-    if (stateFilter && d.state !== stateFilter) continue;
+    const isVn = r.kind === 'vault_notice';
+    const isChg = r.kind === 'status_change';
+    const isSpecial = isVn || isChg;
+    if (isVn) { if (d.state !== 'seen') vnPending++; }
+    else if (isChg) { if (d.state !== 'approved' && d.state !== 'rejected') chgPending++; }
+    else if (d.state==='kept') kept++; else if (d.state==='excluded') excluded++; else open++;
+    if (isNew(r) && d.state==='open' && !isSpecial) newCount++;
+    if (vnOnly && !isVn) continue;
+    if (chgOnly && !isChg) continue;
+    if (!vnOnly && isVn && d.state === 'seen') continue;
+    if (!chgOnly && isChg && (d.state === 'approved' || d.state === 'rejected')) continue;
+    if ((stateFilter === 'kept' || stateFilter === 'excluded') && isSpecial) continue;
+    if (stateFilter && !isSpecial && d.state !== stateFilter) continue;
     if (statusFilter && r.status !== statusFilter) continue;
     if (sourceFilter && r.source !== sourceFilter) continue;
     if (u10only && !r.units10) continue;
@@ -254,29 +380,66 @@ function render() {
     visible.sort((a, b) => (b[1].ts||'').localeCompare(a[1].ts||''));
   const rowsHtml = [];
   for (const [r, d] of visible) {
-    const cls = d.state==='excluded' ? 'excluded' : d.state==='kept' ? 'kept' : '';
+    const isVn = r.kind === 'vault_notice';
+    const isChg = r.kind === 'status_change';
+    const cls = isVn ? 'vaultnotice' : isChg ? 'statuschange'
+              : d.state==='excluded' ? 'excluded' : d.state==='kept' ? 'kept' : '';
     const badges = (r.units10 ? '<span class="u10">10+</span>' : '')
-                 + (isNew(r) ? '<span class="u10" style="background:#e6f6ec;color:var(--green)">חדש</span>' : '')
+                 + (isVn ? '<span class="vn">כבר בכספת — חדש במבא"ת</span>'
+                    : isChg ? '<span class="chg">שינוי סטטוס</span>'
+                    : isNew(r) ? '<span class="u10" style="background:#e6f6ec;color:var(--green)">חדש</span>' : '')
                  + (r.source==='committee' ? '<span class="src">ועדה מקומית</span>' : '');
     const decidedTag = (d.state!=='open' && d.ts)
       ? `<div class="muted">הוחלט: ${fmtDate(d.ts)}</div>` : '';
+    let actionCell;
+    if (isVn) {
+      actionCell = `<button class="btn keep ${d.state==='seen'?'active-keep':''}" data-act="seen">כבר נבדק, הבנתי</button>
+         ${decidedTag}`;
+    } else if (isChg) {
+      const isUnitsOnly = r.note === 'units-only';
+      const changeTxt = isUnitsOnly
+        ? '<span class="muted">שינוי יח"ד בלבד (ללא שינוי סטטוס)</span>'
+        : `${esc(r.old_status||'?')} <span class="muted">(${esc(r.old_date||'')})</span>
+           <span class="arrow">←</span> <b>${esc(r.status||'')}</b>
+           <span class="muted">(${esc(r.status_date||'')})</span>`
+          + (r.status_detail ? `<div class="muted">(${esc(r.status_detail)})</div>` : '');
+      const unitsTxt = (r.old_units!=null && r.new_units!=null && r.old_units!==r.new_units)
+        ? `<span class="units">${r.old_units} ← <b>${r.new_units}</b></span>`
+        : (r.new_units!=null ? `<span class="units">${r.new_units}</span>` : '');
+      actionCell = `<div>${changeTxt}</div>${unitsTxt}<div style="margin-top:5px">
+         <button class="btn keep ${d.state==='approved'?'active-keep':''}" data-act="approve">אשר לכספת</button>
+         <button class="btn ex ${d.state==='rejected'?'active-ex':''}" data-act="reject">דחה</button>
+         ${decidedTag}
+         <input class="comment" data-act="comment" placeholder="הערה..." value="${esc(d.comment)}"></div>`;
+    } else {
+      actionCell = `<button class="btn keep ${d.state==='kept'?'active-keep':''}" data-act="keep">להזנה</button>
+         <button class="btn ex ${d.state==='excluded'?'active-ex':''}" data-act="exclude">להחריג</button>
+         ${decidedTag}
+         ${reasonUi(d)}
+         <input class="comment" data-act="comment" placeholder="הערה..." value="${esc(d.comment)}">`;
+    }
+    // no real link for this row (2026-07-21: an empty href fell back to '#', which browsers
+    // resolve to the CURRENT page — misleadingly looked like a broken/self-referencing link
+    // rather than "no link available"). Render plain text instead of a dead anchor.
+    const planCell = r.url
+      ? `<a href="${esc(r.url)}" target="_blank" title="נצפתה: ${esc((r.first_seen||'').slice(0,10))}">${esc(r.display_plan)}</a>`
+      : `<span title="אין קישור זמין">${esc(r.display_plan)}</span>`;
     rowsHtml.push(`<tr class="${cls}" data-plan="${esc(r.plan)}">
-      <td><a href="${esc(r.url||'#')}" target="_blank" title="נצפתה: ${esc((r.first_seen||'').slice(0,10))}">${esc(r.display_plan)}</a>${badges}</td>
+      <td>${planCell}${badges}</td>
       <td>${esc(r.name)}</td><td>${esc(r.location)}</td><td>${esc(r.authority)}</td>
       <td>${esc(r.status)}</td><td>${esc(r.status_date)}</td>
-      <td>
-        <button class="btn keep ${d.state==='kept'?'active-keep':''}" data-act="keep">להזנה</button>
-        <button class="btn ex ${d.state==='excluded'?'active-ex':''}" data-act="exclude">להחריג</button>
-        ${decidedTag}
-        ${reasonUi(d)}
-        <input class="comment" data-act="comment" placeholder="הערה..." value="${esc(d.comment)}">
-      </td></tr>`);
+      <td>${actionCell}</td></tr>`);
   }
   tbody.innerHTML = rowsHtml.join('');
   const newChip = document.getElementById('newChip');
   if (newChip) newChip.textContent = `חדשות מהסריקה האחרונה (${newCount})`;
+  const vnChip = document.getElementById('vnChip');
+  if (vnChip) vnChip.textContent = `כבר בכספת — חדש במבא"ת (${vnPending})`;
+  const chgChip = document.getElementById('chgChip');
+  if (chgChip) chgChip.textContent = `שינויי סטטוס לאישור (${chgPending})`;
   document.getElementById('counts').textContent =
-    `מציג ${visible.length} · פתוחות ${open} · נשמרו ${kept} · הוחרגו ${excluded} · סה"כ ${DATA.length}`;
+    `מציג ${visible.length} · פתוחות ${open} · נשמרו ${kept} · הוחרגו ${excluded}`
+    + ` · התראות כספת ${vnPending} · שינויי סטטוס ${chgPending} · סה"כ ${DATA.length}`;
 }
 
 const tbody = document.getElementById('rows');
@@ -284,7 +447,9 @@ tbody.addEventListener('click', e => {
   const btn = e.target.closest('button[data-act]');
   if (!btn) return;
   const plan = btn.closest('tr').dataset.plan;
-  const target = btn.dataset.act === 'keep' ? 'kept' : 'excluded';
+  const act = btn.dataset.act;
+  const target = act === 'keep' ? 'kept' : act === 'seen' ? 'seen'
+               : act === 'approve' ? 'approved' : act === 'reject' ? 'rejected' : 'excluded';
   const d = dec(plan);
   d.state = (d.state === target) ? 'open' : target;
   d.ts = new Date().toISOString();
@@ -317,6 +482,16 @@ document.getElementById('u10chip').onclick = () => {
 document.getElementById('newChip').onclick = () => {
   newOnly = !newOnly;
   document.getElementById('newChip').classList.toggle('on', newOnly);
+  render();
+};
+document.getElementById('vnChip').onclick = () => {
+  vnOnly = !vnOnly;
+  document.getElementById('vnChip').classList.toggle('on', vnOnly);
+  render();
+};
+document.getElementById('chgChip').onclick = () => {
+  chgOnly = !chgOnly;
+  document.getElementById('chgChip').classList.toggle('on', chgOnly);
   render();
 };
 document.querySelectorAll('.chip[data-src]').forEach(ch => ch.onclick = () => {
@@ -367,7 +542,11 @@ document.getElementById('exportBtn').onclick = () => {
     if (d.state !== 'open' || d.comment)
       out.push({plan, state:d.state, reason:d.reason||'', comment:d.comment||'',
                 ts:d.ts||''});
-  const blob = new Blob([JSON.stringify(out, null, 1)], {type:'application/json'});
+  // UTF-8 BOM prefix: without it, some Windows text tools (Notepad, some chat/upload
+  // pipelines) auto-detect the system codepage (cp1252/1255) instead of UTF-8 and mangle
+  // every Hebrew character into '×'-led mojibake on open. The BOM makes UTF-8 explicit.
+  const blob = new Blob(['﻿' + JSON.stringify(out, null, 1)],
+                        {type:'application/json;charset=utf-8'});
   const a = document.createElement('a');
   a.href = URL.createObjectURL(blob);
   a.download = 'mavat_review_decisions.json';

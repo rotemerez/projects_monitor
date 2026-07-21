@@ -63,8 +63,16 @@ def _extract(rows, plan):
         "status_desc": match.get("UNIFIED_STATUS_DESC"),
         "status_short": match.get("INTERNET_SHORT_STATUS"),
         "status_code": int(match["INTERNET_STATUS_CODE"]) if match.get("INTERNET_STATUS_CODE") else None,
-        "status_date": match.get("INTERNET_STATUS_DATE"),
-        "decision_date": match.get("BI_STATUS_DATE"),
+        # Swapped 2026-07-15: BI_STATUS_DATE is the date shown next to the current status
+        # on the plan's own Mavat page (confirmed against a live screenshot — plan
+        # 215-1288927's top box showed 16/11/2025, matching BI_STATUS_DATE exactly).
+        # INTERNET_STATUS_DATE instead tracks the latest entry across the FULL "שלבי טיפול
+        # בתכנית" stage-history table, which can advance (e.g. an unrelated Treasury
+        # sub-approval step) without the plan's real displayed status or its date moving
+        # at all — using it as "status_date" caused false-positive "changes" in
+        # mavat_diff.py whenever that happened.
+        "status_date": match.get("BI_STATUS_DATE"),
+        "decision_date": match.get("INTERNET_STATUS_DATE"),
         "update_date": match.get("UPDATE_DATE"),
         "url": f"https://mavat.iplan.gov.il/SV4/1/{int(mid)}/310" if mid else None,
     }

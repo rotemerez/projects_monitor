@@ -65,9 +65,16 @@ def first(d, k):
 
 
 def main():
-    if os.path.exists(DB):
-        os.remove(DB)
-    con = sqlite3.connect(DB); c = con.cursor()
+    # Build into a temp file and atomically replace DB at the end (os.replace), so any
+    # concurrent reader (e.g. mavat_diff.py, woken from the same sleep/wake catch-up) always
+    # sees either the complete old DB or the complete new one — never a freshly-truncated,
+    # not-yet-repopulated one. Found 2026-07-19: a scheduled-task pile-up after the machine
+    # woke from sleep let mavat_diff.py connect to projects.db mid-rebuild (old in-place
+    # os.remove()+recreate), read 0 rows, and silently skip an entire day's status diff.
+    tmp_db = DB + ".tmp"
+    if os.path.exists(tmp_db):
+        os.remove(tmp_db)
+    con = sqlite3.connect(tmp_db); c = con.cursor()
     c.executescript("""
     CREATE TABLE projects(
       project_id INTEGER PRIMARY KEY, city TEXT, note TEXT, project_name TEXT,
@@ -209,6 +216,7 @@ def main():
       CREATE INDEX ix_pr_plan ON projects(plan_current);
     """)
     con.commit(); con.close()
+    os.replace(tmp_db, DB)
     print("refreshed DB from structured vault:", DB)
     print("STATS:", stats)
 

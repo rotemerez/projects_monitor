@@ -319,18 +319,31 @@ municipality) is thin for a shared host serving 70 clients in one weekly blast.
 gentler on the shared backend by construction, not just a scheduling preference.
 The old weekly task was **disabled** 2026-07-13 (superseded, not duplicated).
 
-### Bartech is currently excluded (separate, unrelated breakage)
-`local_committee_scrapers`' Bartech plans scraper uses Selenium +
-`undetected-chromedriver`; Chrome auto-updated on this machine (v149) past what the
-pinned ChromeDriver supports, breaking it independent of the rate-limiting issue above.
-A promising lead, not yet pursued: `C:\R_PROJECTS\Project_update_scraper` (a newer,
-separate project) scrapes Bartech *permits* via plain `requests` — its scraper found
-the CAPTCHA isn't server-enforced (`g-recaptcha-response=x` dummy value works). A
-Playwright network capture against Bartech's *plans* search (`SearchCityPlan`)
-confirmed it fires real XHR/POST requests, suggesting the same gap may exist there —
-which would mean rewriting Bartech-plans as pure HTTP rather than patching
-ChromeDriver. Deferred; `CommitteeSweep` runs Complot only (`--systems complot`,
-the default) until resolved.
+### Bartech plans — fixed 2026-07-13 (rewritten to Playwright, not ChromeDriver)
+`local_committee_scrapers`' Bartech plans scraper used Selenium + `undetected-chromedriver`;
+Chrome auto-updated on this machine (v149) past what the pinned ChromeDriver supports,
+breaking it independent of the rate-limiting issue above.
+
+The HTTP-rewrite lead (`C:\R_PROJECTS\Project_update_scraper`'s Bartech *permits*
+scraper works via plain `requests`, since its CAPTCHA isn't server-enforced —
+`g-recaptcha-response=x` dummy value works) turned out **not** to apply to plans.
+A live network capture + direct test against Bartech's *plans* search
+(`CityPlanSearchResult`, Holon) showed it genuinely enforces a real invisible
+reCAPTCHA v2 server-side: the dummy value gets rejected with an explicit captcha
+error page, even with a warmed-up session cookie. So a pure-HTTP rewrite for plans
+is a dead end without a captcha-solving service.
+
+What actually fixed it: a plain headless **Playwright** session (no stealth, no
+solver) passes that same invisible reCAPTCHA automatically and returns real results —
+verified end-to-end against Holon. The failure was never "Bartech blocks bots"; it
+was that Selenium needs a separately-versioned `chromedriver.exe` binary that has to
+track Chrome's auto-updates, and it fell behind. Playwright bundles and manages its
+own Chromium build, decoupled from the system Chrome/ChromeDriver entirely, so that
+failure mode doesn't exist for it. `systems/bartech/plans.py` in
+`local_committee_scrapers` was rewritten to drive Playwright instead of Selenium,
+keeping the same `BartechPlans.run()` interface and all HTML-parsing logic unchanged
+(it was already Selenium-agnostic BeautifulSoup code). `CommitteeSweep` now runs
+`--systems complot,bartech` (the default).
 
 ### Files (`projects_monitor/committee_scraper/`, mirrors `mavat_scraper/`'s pattern)
 - `run_committee_sweep.py` — `--count N` (rotation) or `--munis a b c` (explicit).
@@ -369,6 +382,35 @@ cross-referencing.
 (already had a Mavat link or matched a vault plan number), 114 genuinely open new
 committee candidates — merged into the unified review page on first run.
 
+**Gap found and fixed (2026-07-14):** the two graduation legs above (own קישור למבאת
+column, vault plan number) both depend on data the *committee* scraper itself
+surfaces. They miss the case where a plan was independently found by the *Mavat*
+nationwide discovery sweep (`mavat_discovery.db`) but the committee scraper's own
+detail page never populated a Mavat link for it — observed for district-authority
+(`מחוזית`) plans on Complot, where the local committee page doesn't always expose the
+link. Found via a concrete example: Ashdod plan `603-1218759` was sitting as an open
+committee candidate while already present in `mavat_discovery.db` (discovered
+2026-07-09, real `mavat.iplan.gov.il` URL) — a duplicate of itself across the two
+review-page sources. A full check found **35 of 240** open committee candidates
+(~15%) in this state, concentrated in Complot municipalities (Haifa, Ashdod,
+Ashkelon, Bat Yam).
+
+Fix, two parts, in `run_committee_sweep.py`:
+1. `import_master_csv` gained a third graduation leg: plan number checked directly
+   against the full `mavat_discovery.db` plan set (`mavat_discovery_plans()`), not
+   just the committee CSV's own link column.
+2. `reconcile_with_mavat_discovery()` — runs on *every* sweep against **all**
+   currently-open committee candidates, not just the municipalities just scraped.
+   Necessary because `CommitteeSweep` and the Mavat discovery sweep run on
+   independent schedules: a plan can surface on the Mavat side days after its
+   committee row was already imported as open, and that municipality might not be
+   re-scraped again for up to ~2 weeks under the combined Complot+Bartech rotation.
+
+Backfilled once by hand (2026-07-14): all 35 existing false-open rows graduated,
+`mavat_review.html` regenerated (240 → 205 open committee candidates). Going
+forward this self-corrects every day as part of the normal `CommitteeSweep` run —
+no manual step needed.
+
 ### Unified review page
 `mavat_scraper/make_review_page.py` now merges both sources (`mavat_discovery.db` +
 `committee_state.db`) into one `mavat_review.html`, tagged `source: 'mavat'|'committee'`
@@ -376,3 +418,166 @@ with a filter chip for each. Decisions are keyed by a per-source-unique id (bare
 number for Mavat rows; `muni::plan_number` for committee rows — the `::` makes
 collisions between the two structurally impossible). `apply_review.py` routes each
 decision to the correct database by that id shape.
+
+### `auto_rules.py` extended to committee candidates (2026-07-14)
+Until this date, `auto_rules.py` only ever touched `mavat_discovery.db` — committee
+candidates never got any automatic exclusion at all, even though the same content rules
+(R1 technical-plan names, R2 Bedouin-settlement, energy) apply just as well there. Found
+by reviewing a batch of manual review decisions: the user was hand-rejecting the same
+shape of committee candidate over and over — plan numbers that aren't in the standard
+local format (`NNN-NNNNNNN`), which turn out to be national/regional plans (תמ"א, תמ"ל)
+or old municipal numbering (`בי/857/שופרסל`, `חל/1/ד-22`) that Complot/Bartech scrapers
+surface at the committee level but which are properly tracked (if at all) via the Mavat
+discovery sweep instead. Checked the actual open queue: **165 of 205** open committee
+candidates (83%) matched this shape.
+
+Added two new rules to `auto_rules.py`, both applied only to `committee_candidates`
+(never to `mavat_discovery.db` — a national-format plan number *arriving via the Mavat
+sweep itself* is a legitimate plan worth tracking there; the user has explicitly kept
+several, e.g. `תמ"ל/1131`, `תת"ל/168`):
+- **R4** — plan number doesn't match `^\d{3}-\d{6,8}$` → excluded, reason `מספר תוכנית
+  לא בפורמט מקומי (ארצי/ישן) - נעקב דרך סריקת מבא"ת`.
+- **R5** (both sources) — plan number/name is an obvious scraper test row (repeated-digit
+  dummy number, or contains בדיקה/ניסיון) → excluded as `רשומת בדיקה/דמה`.
+
+`auto_rules.py` now runs both `apply_to_mavat()` and `apply_to_committee()` by default
+(flags `--mavat-only` / `--committee-only` to restrict); `--revert` undoes automatic
+exclusions on both sources. Wired `--committee-only` into `run_committee_sweep.bat`
+itself (after the daily scrape, before `make_review_page.py`) so new committee
+candidates get this cleanup same-day, rather than waiting for the next `MavatDiscovery`
+run (which already called plain `auto_rules.py`, now also covering committee since that's
+the new default). Result: open committee queue went from 205 → 0 in one pass (35 by
+manual decision that same session, 169 by the new rule, one overlap).
+
+### Export-button Hebrew corruption — root-caused and fixed (2026-07-14)
+Every decisions JSON exported from `mavat_review.html` / `mavat_changes.html` and pasted
+back into chat arrived with Hebrew mangled into `×`-led mojibake. Root cause: the export
+button built its download `Blob` from `JSON.stringify(...)` with no UTF-8 BOM and no
+explicit charset (`type: 'application/json'`). Hebrew's UTF-8 lead byte (`0xD7`) read
+under the Windows-1252/cp1252 codepage renders as `×` — exactly the corruption pattern
+seen everywhere downstream. Whatever the actual read path is (a text editor/opener without explicit
+UTF-8 detection, or the upload pipeline itself), the fix is the same: make the encoding
+unambiguous at the source.
+
+Fixed in both `make_review_page.py` and `make_changes_page.py`'s export handlers: prefix
+the blob content with a literal UTF-8 BOM (`'﻿' + JSON.stringify(...)`) and set
+`type: 'application/json;charset=utf-8'`. Correspondingly changed `apply_review.py` and
+`apply_changes.py` to read the decisions file with `encoding="utf-8-sig"` (strips a
+leading BOM if present, no-ops if absent) instead of plain `"utf-8"` — Python's
+`json.loads` otherwise chokes on a literal BOM character.
+
+**Verified end-to-end** with a Playwright test that actually clicks the export button and
+inspects the downloaded bytes: BOM present (`b'\xef\xbb\xbf'`), Hebrew decodes cleanly
+(`תמא/75/ב`, no mojibake), and `apply_review.py` parses the file without error.
+
+---
+
+## Single-page architecture + real unit/description detection (session 2026-07-15/16)
+
+### Unified 9-status whitelist (replaces two separate, narrower lists)
+Per user decision 2026-07-15, one status set now governs new-candidate discovery,
+vault-notices (below), AND status-change tracking for vault-tracked plans — previously
+these were three separate, drifting concepts (`TARGET_STATUSES` for discovery,
+`IGNORED_NEW_STATUSES` for diff, no filter at all for changes). Kept in sync as
+`TARGET_STATUSES` (`mavat_discover.py`) / `MAVAT_TRACKED_STATUSES` (`mavat_diff.py`,
+`make_review_page.py`):
+`הכנת הודעה 77/78`, `הכנת תכנית`, `Pre-Ruling`, `תסקיר סביבתי`, `בבדיקת תנאי סף`,
+`בבדיקה תכנונית`, `הפקדה להתנגדויות/השגות`, `אישור`, `נדחתה`. Both committee statuses
+(`בתכנון`, `בהפקדה`) are always tracked, no filtering needed there.
+
+Widening the whitelist retroactively flipped `target_status=1` for ~16k historical
+`אישור`/`נדחתה` rows in `mavat_discovery.db` that were never candidates before. One-time
+migration (`migrate_target_status.py`, kept as a reference script — not part of any
+scheduled task) recomputed `target_status` for every row and auto-excluded the ~14.5k of
+those that were `first_seen` before the cutover date (pure migration noise, tagged
+`'אוטומטי: סטטוס נכלל לראשונה במעקב ב-2026-07-15...'`) so only genuinely new plans
+reaching these statuses show up going forward. **The identical flood re-appeared on the
+vault-notice channel** (1,613 historical in-vault plans newly qualified) and got the same
+treatment — this is worth remembering if the status list ever widens again: a status-set
+change must be checked against every surface it feeds, not just the one you're editing.
+
+### Single review page (retires `mavat_changes.html`)
+`mavat_review.html` now carries **three row kinds**, all fed from `make_review_page.py`
+and routed through one `apply_review.py`:
+- **`candidate`** (unchanged) — new plan, not yet in the vault. Keep/exclude + reason/
+  comment, same as before.
+- **`vault_notice`** (new) — a plan already tracked in the vault that just appeared in
+  the Mavat sweep for the first time (`in_vault=1`, `vault_notice_seen=0`). Mavat's own
+  page (goals, quantities, PDFs) is often richer than the committee source the plan was
+  originally entered from, so this is a one-time "go take a look" nudge, not a
+  keep/exclude decision — a single "כבר נבדק, הבנתי" button sets `vault_notice_seen=1`
+  and it never shows again. New columns: `discovered.vault_notice_seen` (INTEGER),
+  `discovered.vault_notice_seen_at` (TEXT).
+- **`status_change`** (new, absorbs the retired `mavat_changes.html`) — a pending row from
+  `mavat_state.db:mavat_changes` (`approved IS NULL`), filtered to only show when the
+  plan's current/new status is in `MAVAT_TRACKED_STATUSES` (a units-only change, which has
+  no `new_status` of its own, is judged by the plan's live `status_desc`). Keyed
+  `chg::<id>` so it can never collide with a bare plan number or a `muni::plan` committee
+  id. Approve writes the vault status line (logic moved verbatim from the retired
+  `apply_changes.py`) and reruns `refresh_db.py`; reject just dismisses.
+
+**Deleted**: `mavat_scraper/make_changes_page.py`, `apply_changes.py`,
+`mavat_changes.html`. `run_status_diff.bat` now calls `make_review_page.py` instead.
+
+### Real per-plan unit counts + description-text interpretation (`mavat_discover_units.py`, new file)
+The `--tag-units` sweep (`mavat_discover.py`) is a one-off snapshot — run once on
+2026-07-12, never since. Any plan whose real unit count only became visible on Mavat's
+structured quantities table *after* that date sits permanently tagged `units_ge10=0` and
+gets silently auto-excluded by `auto_rules.py`'s R3 ("<10 units") even when the real count
+is large. Confirmed on `302-1493931`: tagged `units_ge10=0` from the stale sweep, actually
+**300 units** per the live SV4 detail page.
+
+`mavat_discover_units.py` reuses `MavatSession.fetch_detail(mid)` + `mavat_diff.
+parse_quantities` (same machinery the daily `MavatStatusDiff` already uses for its units
+baseline) to fetch a live number per plan, targeting (a) candidates just auto-excluded by
+R3, (b) never-checked open candidates in early statuses. Un-excludes if real units≥10.
+
+Same fetch also reads `recExplanation.EXPLANATION` (a field on the SV4 detail JSON not
+previously used) — the plan's actual free-text description ("דברי הסבר"). Confirmed on
+`259-1374917`: zero units on Mavat's structured table, but the text describes "...רובע
+מגורים ותעסוקה... 106 ד' שטח חקלאי..." (a residential-quarter proposal on 106 dunam) — a
+real project the units-only signal would silently bury. Two independent signals, either
+un-excludes an R3-excluded candidate (user-approved 2026-07-16):
+- `SIZEABLE_SIGNAL_RX` — keyword phrases: quarter/new-neighborhood language
+  (`רובע מגורים`, `שכונה חדשה`, `עיר חדשה`, `הקמת שכונה`, `אזור מגורים חדש`), mixed
+  residential+employment framing (`מגורים ותעסוקה`, `מתחם מגורים`), expansion/
+  population-growth framing (`הרחבת ה?ישוב/עיר`, `הגדלת האוכלוסייה`, `תוכנית אזורית`),
+  explicit magnitude prose (`מאות/אלפי יח"ד`, `מרכז הייטק`, `פארק תעסוקה`).
+- `DUNAM_RX` — a stated land area over 10 dunam (`\d+\s*ד(?:ונ(?:ם|מים)|['׳])`).
+
+New columns: `discovered.units` (INTEGER), `discovered.units_at` (TEXT, when last
+detail-fetched), `discovered.explanation` (TEXT, raw description). The specific matched
+reason (keyword or dunam figure) is only printed to `discovery_last.log`, not surfaced on
+the review page (user's explicit call — they'll click through to Mavat instead).
+
+Wired into `run_discovery.bat` as an **ongoing daily step** (`--limit 25`, after
+`auto_rules.py --units-rule`, before `make_review_page.py`) — no one-time catch-up over
+the existing backlog was requested; this only affects candidates newly excluded by each
+day's fresh sweep.
+
+### Two real bugs found and fixed (2026-07-16)
+See `docs/BUG_REFERENCE.md` for full detail:
+- **SQL NULL-handling bug** in the backlog-noise filter added alongside the status-
+  whitelist migration: `exclude_reason NOT LIKE '...'` silently dropped **every**
+  genuinely open candidate (any row with `exclude_reason IS NULL`) for a full day, not
+  just the intended migration noise. Fixed with an explicit `IS NULL OR` guard.
+- **`status_date`/`decision_date` field mapping was swapped** in `mavat_status.py` and
+  `mavat_discover.py`: `BI_STATUS_DATE` is the date actually shown next to a plan's
+  current status on its own Mavat page (confirmed against a live screenshot);
+  `INTERNET_STATUS_DATE` instead tracks the latest entry across the *whole* "שלבי טיפול
+  בתכנית" stage-history table, which can advance from an unrelated administrative
+  sub-step without the real status or its date moving — using it as "status_date" caused
+  false-positive status-change entries. Backfilled all of `mavat_state.db` for free (both
+  fields already stored, just swapped columns); `mavat_discovery.db` self-corrects as rows
+  get naturally re-touched by future sweeps.
+
+### Decisions made this session (do not re-litigate)
+- **77/78-status plans are explicitly NOT auto-excluded.** A batch of ~84 stale
+  rejections at that status on 2026-07-14 looked like a pattern worth automating — it
+  wasn't; those were stale duplicates already reviewed, and the user wants to keep seeing
+  *new* 77/78-status candidates as an early planning-intent signal. Built and reverted an
+  auto-rule for this mid-session.
+- Detail-page fetch (`mavat_discover_units.py`) is ongoing-only by design, no backlog
+  catch-up (politeness cost against a WAF-protected site).
+- No historical backfill of `mavat_discovery.db.status_date` for the field-mapping fix —
+  not worth a live re-scrape just for a display date.

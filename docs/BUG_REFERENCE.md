@@ -1,8 +1,84 @@
 # Bug Reference
 
-**Last Updated:** 2026-07-08
+**Last Updated:** 2026-07-21
 
 Known issues, root causes, and solutions. Newest on top.
+
+---
+
+## Mavat scraper — discovery/review pipeline (cont'd)
+
+### R3 auto-exclusion fired on unconfirmed default unit count (FIXED 2026-07-21)
+- **Symptom**: `416-1448794` (real units=15) got auto-excluded by `auto_rules.py`'s R3 on
+  its very first day in the discovery queue.
+- **Root cause**: every newly discovered row defaults to `units_ge10=0` until
+  `mavat_discover_units.py` fetches a real count; R3 treated that placeholder as
+  equivalent to a real confirmed low count and excluded the plan before it ever got a
+  chance to be checked.
+- **Fix**: R3 now requires `confirmed=True` (set only once a real fetch has happened) —
+  an unconfirmed low `units_ge10` flag does nothing; the plan stays open until confirmed
+  one way or the other.
+
+### Stale browser-cache kept an un-excluded plan showing "excluded" (FIXED 2026-07-21)
+- **Symptom**: `502-1406529` was auto-excluded, then un-excluded server-side (same-day
+  rule fix + backlog reopen), but an already-open browser tab kept showing it as excluded.
+- **Root cause**: `mavat_review.html`'s `localStorage`-seeding logic only ever seeded a
+  plan's decision once per browser; a later server-side change to an auto-tagged decision
+  was never picked back up.
+- **Fix**: only decisions whose reason starts `אוטומטי:` (auto-rule origin) now re-sync
+  from the DB on every page load to match current server state; any genuine human decision
+  is left untouched.
+
+### Silent near-empty vault read produced a missed status change (FIXED 2026-07-19)
+- **Symptom**: a real status change on `414-1294818` went undetected by a scheduled run.
+- **Root cause**: `mavat_diff.py` read `projects.db` while it was mid-rebuild (a
+  scheduled-task pile-up window, e.g. after the machine woke from sleep), got back a
+  truncated table, and silently ran its diff against a near-empty plan list instead of
+  failing loudly.
+- **Fix**: `load_tracked_plans()` returning fewer than 1000 plans (vs. the normal several
+  thousand) now hard-fails the run instead of proceeding.
+
+---
+
+## Mavat scraper — discovery/review pipeline
+
+### `status_date`/`decision_date` field mapping was swapped (FIXED 2026-07-16)
+- **Symptom**: 4 of 5 pending `שינויי סטטוס לאישור` entries showed the *same* status text
+  before and after, only the date differed — looked like noise, not real changes. Also, a
+  live screenshot of a plan's own Mavat page showed a different date next to its current
+  status than what the pipeline had recorded.
+- **Root cause**: `mavat_status.py`'s `_extract()` mapped `status_date` from
+  `INTERNET_STATUS_DATE` and `decision_date` from `BI_STATUS_DATE` — backwards.
+  `BI_STATUS_DATE` is the date actually shown next to the current status on the plan's own
+  page; `INTERNET_STATUS_DATE` instead tracks the latest entry across the *whole* "שלבי
+  טיפול בתכנית" stage-history table, which can advance from an unrelated administrative
+  sub-step (e.g. a Treasury sub-approval) without the real status or its date moving at
+  all. Using it as "status_date" made `mavat_diff.py`'s change-detection
+  (`status_date != old_date`) fire on pure noise.
+- **Fix**: swapped the mapping in `mavat_status.py` (`_extract()`) and
+  `mavat_discover.py`'s inline extraction. Backfilled all 2,029 `mavat_state.db` rows for
+  free (both fields were already stored, just swapped the two columns — no re-scraping
+  needed). `mavat_discovery.db`'s `status_date` self-corrects as rows get naturally
+  re-touched by future incremental sweeps (no backfill there — not worth a live re-scrape
+  for a display date).
+- **Fallout**: the 4 same-status pending changes were confirmed false positives from this
+  bug and dismissed (`353-1545854`, `306-1464056`, `302-1306018`, `215-1288927`); the 1
+  genuine transition (`216-1534395`, `בבדיקה תכנונית → נדחתה`) was kept for normal review.
+
+### SQL `NOT LIKE` against a nullable column silently hid every open candidate (FIXED 2026-07-16)
+- **Symptom**: the daily discovery run reported very few plans for review; a specific plan
+  known to have changed status the day before (`102-1477827`) was completely absent from
+  `mavat_review.html`, even though its DB row was correct (`excluded=0`, target status).
+- **Root cause**: a filter added to `make_review_page.py`'s candidate query
+  (`AND exclude_reason NOT LIKE 'אוטומטי: סטטוס נכלל לראשונה%'`, meant to strip a
+  one-time migration-noise tag out of the payload) evaluates to SQL `NULL` — not
+  `TRUE` — for every row where `exclude_reason IS NULL`. A `WHERE` clause treats `NULL` as
+  false, so **every genuinely open, never-excluded candidate** (all of which have
+  `exclude_reason IS NULL`) was silently dropped from the page. Not just the intended
+  migration noise — everything.
+- **Fix**: `(exclude_reason IS NULL OR exclude_reason NOT LIKE '...')`. **Lesson: any
+  future `NOT LIKE`/`!=`/`<>` filter against a nullable column needs the same `IS NULL OR`
+  guard** — SQL NULL comparisons never evaluate to true, including negated ones.
 
 ---
 

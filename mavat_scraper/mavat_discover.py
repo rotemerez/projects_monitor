@@ -39,15 +39,24 @@ PROJECTS_DB = HERE.parent / "projects.db"
 DISCOVERY_DB = HERE / "mavat_discovery.db"
 SEARCH_URL = "https://mavat.iplan.gov.il/SV3?searchEntity=1&entityType=1&searchMethod=2"
 
-# Early-stage statuses = a plan that is new in the pipeline (chosen by the user
-# 2026-07-09; revised 2026-07-12: added Pre-Ruling, dropped two labels that do not exist
-# as Mavat UNIFIED_STATUS_DESC values). Matching is exact.
+# Statuses worth surfacing for review (chosen by the user 2026-07-09; revised 2026-07-12:
+# added Pre-Ruling, dropped two labels that do not exist as Mavat UNIFIED_STATUS_DESC
+# values; revised 2026-07-15: unified with mavat_diff.py's status-change whitelist — same
+# 9 statuses now govern new-candidate discovery here AND change-reporting there. Anything
+# else (עריכת תכנית תמ"א, הפצה למוזמנים, במילוי תנאים להפקדה, הגשת/מילוי הערות והשגות,
+# הכרעה בהתנגדויות/אישור, בהליך אישור, העברה לממשלה לאישור) is intentionally excluded —
+# the user does not want review or vault updates for those. Matching is exact. KEEP IN
+# SYNC with MAVAT_TRACKED_STATUSES in mavat_diff.py.
 TARGET_STATUSES = {
-    "בבדיקה תכנונית",
-    "בבדיקת תנאי סף",
-    "תסקיר סביבתי",
     "הכנת הודעה 77/78",
+    "הכנת תכנית",
     "Pre-Ruling",
+    "תסקיר סביבתי",
+    "בבדיקת תנאי סף",
+    "בבדיקה תכנונית",
+    "הפקדה להתנגדויות/השגות",
+    "אישור",
+    "נדחתה",
 }
 
 CLICK_DELAY_S = 0.8       # politeness between load-more clicks
@@ -369,7 +378,7 @@ def store(con, rows, vault, since):
                            in_vault=excluded.in_vault, last_seen=excluded.last_seen,
                            raw=excluded.raw""",
                     (plan, row.get("ENTITY_NAME"), row.get("ENTITY_LOCATION"),
-                     row.get("AUTH_NAME"), status, row.get("INTERNET_STATUS_DATE"),
+                     row.get("AUTH_NAME"), status, row.get("BI_STATUS_DATE"),
                      int(mid) if mid else None,
                      f"https://mavat.iplan.gov.il/SV4/1/{int(mid)}/310" if mid else None,
                      is_target, in_vault, now, now, json.dumps(row, ensure_ascii=False)))

@@ -1,10 +1,59 @@
 # Version Log
 
-**Last Updated:** 2026-07-08
+**Last Updated:** 2026-07-21
 
 Release / change history, newest on top.
 
 ---
+
+## 2026-07-19/21 — 106(ב) detection, sanity backstop, R3/name-rule fixes, repo-hygiene pass
+
+- **Section 106(ב) re-deposit detection** (`mavat_diff.py`): surfaces the plan's own
+  stage-history label when a status change is actually a 106(ב) re-deposit, instead of the
+  generic status bucket both cases share. New `mavat_changes.status_detail` column.
+- **Silent-empty-vault sanity backstop**: `mavat_diff.py` now hard-fails if
+  `load_tracked_plans()` returns fewer than 1000 plans, instead of silently diffing
+  against a mid-rebuild/truncated `projects.db`.
+- **`docs/TRAINEE_GUIDE.md`** added — top-to-bottom onboarding explainer.
+- **R3 auto-exclusion fixed** to require a confirmed real unit count, not the default
+  placeholder; `בית פרטי (צמוד קרקע)` name-rule broadened; a stale-browser-cache bug that
+  kept un-excluded plans showing "excluded" indefinitely was fixed. See
+  `docs/BUG_REFERENCE.md` for all three.
+- **Repo-hygiene pass**: the repo had zero commits since 2026-07-13 across five sessions
+  of real work; retroactively documented the missing 07-19 session, removed a stray
+  malformed output file, and committed everything accumulated (excluding two superseded
+  rural-planning spreadsheet files, left untracked per the 2026-07-16 decision).
+
+## 2026-07-15/16 — Single-page review architecture, real unit/description detection, two data bugs fixed
+
+- **Unified 9-status whitelist** now governs new-candidate discovery, vault-notices, and
+  status-change tracking together (previously three separate, drifting lists): `הכנת הודעה
+  77/78`, `הכנת תכנית`, `Pre-Ruling`, `תסקיר סביבתי`, `בבדיקת תנאי סף`, `בבדיקה תכנונית`,
+  `הפקדה להתנגדויות/השגות`, `אישור`, `נדחתה`. One-time migration recomputed
+  `target_status` for all existing rows; the resulting historical-backlog flood (~14.5k
+  candidates, then 1,613 vault-notices) was bulk-dismissed per user decision, tagged and
+  auditable, so only genuinely new plans reaching these statuses surface going forward.
+- **`mavat_review.html` merged into a single page** — added `vault_notice` (a vault-tracked
+  plan's first Mavat appearance, one-click dismiss) and `status_change` (absorbs the
+  retired `mavat_changes.html`, keyed `chg::<id>`) row kinds alongside the existing
+  `candidate` kind. `make_changes_page.py`, `apply_changes.py`, `mavat_changes.html`
+  deleted; their logic lives in `make_review_page.py`/`apply_review.py` now.
+- **`mavat_discover_units.py`** (new file): fetches real per-plan unit counts via the SV4
+  detail page (the `--tag-units` sweep was a stale one-off snapshot from 2026-07-12 —
+  confirmed a real bug on `302-1493931`, tagged <10 units but actually 300). Same fetch
+  also reads the plan's free-text description (`recExplanation.EXPLANATION`) and
+  un-excludes an R3-excluded candidate when the text signals a sizeable project despite no
+  parseable unit count (keyword list + >10-dunam land-area check, both user-approved) —
+  confirmed on `259-1374917`. Runs as an ongoing daily step in `run_discovery.bat`.
+- **Two real bugs found and fixed** (see `docs/BUG_REFERENCE.md`): a SQL `NOT LIKE`
+  filter silently hid every open candidate for a day (NULL-handling), and
+  `status_date`/`decision_date` were swapped in the Mavat field mapping, causing
+  false-positive status-change entries.
+- **`RefreshProjectsDB` scheduled task fixed**: was calling bare `python` (PATH lookup,
+  had started failing) instead of a full interpreter path like the other three tasks.
+- Applied a 2,959-decision review batch: 2,885 excluded, 60 kept (queued for manual vault
+  entry), 7 vault-notices dismissed, 3 status-changes approved (vault written,
+  `projects.db` refreshed automatically).
 
 ## 2026-07-08 — Documentation framework + Mavat prototype
 
