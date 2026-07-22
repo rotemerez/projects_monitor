@@ -34,6 +34,14 @@ Round-2 rules (2026-07-14, committee-only):
   R5 test/placeholder entries — plan number is a run of one repeated digit, or the plan
      name/number contains 'בדיקה' / 'ניסיון' / 'נסיון' -> exclude as a scraper test row.
 
+Round-3 rule (2026-07-22, committee-only):
+  R6 blocked regional councils — 18 councils (see BLOCKED_COMMITTEE_MUNIS) where every
+     candidate ever surfaced has been rejected (thousands of rows, 0 kept): rural
+     kibbutz/moshav committees whose filings are almost always internal mechanics, not
+     real neighborhood development. Deliberately unconditional, no content override — see
+     the comment above BLOCKED_COMMITTEE_MUNIS for why. `mitar` was evaluated and kept OUT
+     of this list (has a genuine open neighborhood candidate in Hura).
+
 NOTE (2026-07-15): a batch of ~84 candidates with status "הכנת הודעה 77/78" (§77-78
 pre-planning notice) were manually rejected on 2026-07-14, and it briefly looked like a
 good auto-rule candidate. It is NOT: the user rejected those specific ones because they'd
@@ -108,10 +116,32 @@ INTEREST_SIGNAL = re.compile(
     r"פארק|גן ציבורי|שצ.?פ|ציבור|חינוך|ספורט")
 
 # Actively NOT of interest regardless of size (user 2026-07-12): solar energy fields,
-# energy corridors and the like.
+# energy corridors and the like. Broadened 2026-07-22 (206-1183003, "מתקן אגרו וולטאי
+# בשטחי כפר חיטים", manually rejected "not interested in photo voltaic fields"): the old
+# פוטו.?וולט alternative only matched photo-voltaic, missing the equally common
+# agro-voltaic (אגרו וולטאי, solar panels over active farmland) phrasing.
 ENERGY_RULE = ("אנרגיה/תשתית חשמל", re.compile(
-    r"סול[אר]רי|פוטו.?וולט|אגירת אנרגיה|מסדרון (תשתיות |)אנרגיה|אנרגיה מתחדשת|"
+    r"סול[אר]רי|(פוטו|אגרו).?וולט|אגירת אנרגיה|מסדרון (תשתיות |)אנרגיה|אנרגיה מתחדשת|"
     r"קו מתח|מתח עליון|תחנת כוח|טורבינ|תחנת טרנספורמציה"))
+
+# R6 (committee-only, 2026-07-22): entire regional councils where the user has rejected
+# EVERY candidate ever surfaced (thousands of rows, 0 kept) — these are רשויות אזוריות
+# covering dispersed rural kibbutzim/moshavim, where committee filings are almost always
+# routine internal mechanics (תשריטי חלוקה, adding a 3rd unit to one farm plot under
+# נחלה rules, internal industrial/public-building zoning) rather than real neighborhood-
+# scale development. Deliberately unconditional — no content override (unlike every other
+# rule here) — because testing showed 331 already-excluded plans in these same councils
+# already contain a "positive signal" keyword (שכונ/תוספת יח"ד/מתחם) and were rejected
+# anyway; in this context those words don't mean what they mean elsewhere. `mitar` was
+# considered and explicitly EXCLUDED from this list: it contains real Bedouin towns (e.g.
+# Hura) with genuine open neighborhood-scale candidates (652-0754705, "חורה - שכונה 27"),
+# unlike the other 18 which are exclusively kibbutz/moshav/agricultural land.
+BLOCKED_COMMITTEE_MUNIS = {
+    "lev hagalil", "mateh yehuda", "ma'ale hagalil", "giv'ot alonim", "ma'ale naftali",
+    "emeq hayarden", "merom hagalil", "biq'at beit hakerem", "hagalil center",
+    "menashe alona", "iron", "misgav", "kessem", "lakhish", "ma'ale hermon", "hagilboa",
+    "harel", "hagalil lower",
+}
 
 # R4 (committee-only, 2026-07-14): standard local-plan number shape is NNN-NNNNNNN
 # (e.g. 603-1218759). Anything else — תמ"א/תמ"ל/תת"ל national plans, old municipal
@@ -221,14 +251,17 @@ def apply_to_committee(dry_run):
     cur = con.cursor()
     cols = {r[1] for r in cur.execute("PRAGMA table_info(committee_candidates)")}
     obj_col = ", objectives" if "objectives" in cols else ", NULL"
-    cur.execute(f"""SELECT id, plan_number, plan_name, status{obj_col} FROM committee_candidates
+    cur.execute(f"""SELECT id, muni, plan_number, plan_name, status{obj_col}
+                    FROM committee_candidates
                    WHERE excluded=0 AND COALESCE(graduated,0)=0 AND COALESCE(kept,0)=0""")
     rows = cur.fetchall()
     hits = {}
-    for cid, plan_number, plan_name, status, objectives in rows:
+    for cid, muni, plan_number, plan_name, status, objectives in rows:
         pn = plan_number or ""
         rule = None
-        if TEST_ROW_RX.search(plan_name or "") or TEST_ROW_RX.search(pn):
+        if muni in BLOCKED_COMMITTEE_MUNIS:
+            rule = "רשות אזורית כפרית - מחוץ לתחום עניין"
+        elif TEST_ROW_RX.search(plan_name or "") or TEST_ROW_RX.search(pn):
             rule = "רשומת בדיקה/דמה"
         elif not LOCAL_PLAN_FORMAT_RX.match(pn):
             rule = 'מספר תוכנית לא בפורמט מקומי (ארצי/ישן) - נעקב דרך סריקת מבא"ת'

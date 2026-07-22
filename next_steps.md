@@ -1,8 +1,26 @@
 # Next Steps — Projects Vault → DB & Mavat Automation
 
-**Last Updated:** 2026-07-21
+**Last Updated:** 2026-07-22
 
 Living task-tracking document. Newest section on top. Check items off as they land.
+
+---
+
+## Active — R6 regional-council blocklist, energy-rule fix — BUILT 2026-07-22
+
+- [x] **R6 (new, committee-only)**: found by reviewing `docs/mavat_review_decisions (6).json`
+      (11,905 decisions) — 18 regional councils (מועצות אזוריות) have 0% keep rate across
+      their entire history (thousands of exclusions: lev hagalil 2,525, mateh yehuda 1,591,
+      etc.) because their filings are almost always rural internal mechanics, not real
+      neighborhood development. Added an unconditional blocklist (`BLOCKED_COMMITTEE_MUNIS`
+      in `auto_rules.py`) — deliberately no content override, since 331 already-excluded
+      plans in these councils already contained a "positive signal" keyword and got
+      rejected anyway. `mitar` was checked and kept OUT of the blocklist (genuine open
+      neighborhood candidate in Hura, `652-0754705`). Applied once: 1,464 committee
+      candidates excluded.
+- [x] **ENERGY_RULE regex broadened** to also catch `אגרו וולטאי` (agro-voltaic), not just
+      `פוטו.?וולט` — confirmed on `206-1183003`. 10 more candidates caught on the same run.
+- [ ] Full detail in `docs/VERSION_LOG.md` / `docs/BUG_REFERENCE.md`.
 
 ---
 

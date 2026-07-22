@@ -167,6 +167,29 @@ at root because the task passes `projects.db` as its output argument.
 
 ## Session History
 
+- **2026-07-22 — R6 regional-council blocklist, energy-rule fix**
+  - Reviewed `docs/mavat_review_decisions (6).json` (11,905 decisions) specifically to
+    look for new/modified auto-exclusion rules. Found a very clean pattern: 18 regional
+    councils (מועצות אזוריות — rural kibbutz/moshav committees) have a **0% keep rate
+    across their entire history** (thousands of exclusions each, e.g. lev hagalil 2,525,
+    mateh yehuda 1,591). Added `BLOCKED_COMMITTEE_MUNIS` — an unconditional auto-exclusion
+    in `auto_rules.py` (R6, committee-only). Deliberately **no content override**: testing
+    showed 331 already-excluded plans in these same councils already contained a nominal
+    "positive signal" keyword (שכונ/תוספת יח"ד/מתחם, which usually means "add a 3rd unit
+    to one farm plot" or "internal industrial zone" in this context, not real development)
+    and were rejected anyway — an override would have silently reopened all of them.
+    `mitar` (Meitar) was checked individually and **excluded from the blocklist**: it
+    covers real Bedouin towns (Hura) with genuine open neighborhood candidates
+    (`652-0754705`, "חורה - שכונה 27"), unlike the other 18 which are purely agricultural.
+    Applied once: 1,464 committee candidates excluded.
+  - **`ENERGY_RULE` regex broadened** (`פוטו.?וולט` → `(פוטו|אגרו).?וולט`) to also catch
+    `אגרו וולטאי` (agro-voltaic) — found on `206-1183003`, manually rejected with the
+    comment "not interested in photo voltaic fields" despite being an energy plan.
+  - **Process note**: per standing feedback, presented both findings (with per-municipality
+    evidence, not just aggregate counts) and got explicit confirmation before touching
+    `auto_rules.py` — the user's first answer ("ask me per-muni first") caught the `mitar`
+    exception that a blanket "yes" would have missed.
+
 - **2026-07-19/21 — 106(ב) detection, sanity backstop, R3/name-rule fixes, repo-hygiene pass**
   - **Section 106(ב) re-deposit detection** (`mavat_diff.py`, 2026-07-19): Mavat's status
     bucket shows the same generic `הפקדה להתנגדויות/השגות` label for an original deposit

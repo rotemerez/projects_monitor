@@ -1,8 +1,20 @@
 # Bug Reference
 
-**Last Updated:** 2026-07-21
+**Last Updated:** 2026-07-22
 
 Known issues, root causes, and solutions. Newest on top.
+
+---
+
+## Mavat scraper — discovery/review pipeline (cont'd, 2)
+
+### ENERGY_RULE missed agro-voltaic phrasing (FIXED 2026-07-22)
+- **Symptom**: `206-1183003` ("מתקן אגרו וולטאי בשטחי כפר חיטים") was manually rejected
+  ("not interested in photo voltaic fields") instead of being auto-excluded.
+- **Root cause**: `auto_rules.py`'s `ENERGY_RULE` regex only matched `פוטו.?וולט`
+  (photo-voltaic); the equally common `אגרו וולטאי` (agro-voltaic — solar panels installed
+  over active farmland) phrasing wasn't covered.
+- **Fix**: broadened to `(פוטו|אגרו).?וולט`.
 
 ---
 

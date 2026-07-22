@@ -1,10 +1,28 @@
 # Version Log
 
-**Last Updated:** 2026-07-21
+**Last Updated:** 2026-07-22
 
 Release / change history, newest on top.
 
 ---
+
+## 2026-07-22 — R6 regional-council blocklist, energy-rule regex fix
+
+- **R6 (new, committee-only)**: unconditional auto-exclusion for 18 regional councils
+  (`BLOCKED_COMMITTEE_MUNIS` in `auto_rules.py`) where the user has rejected every
+  candidate ever surfaced — thousands of rows, 0 kept. Found by analyzing
+  `docs/mavat_review_decisions (6).json` (11,905 decisions): these councils cover
+  dispersed rural kibbutzim/moshavim, and their filings are almost always internal
+  mechanics (parceling, adding a 3rd unit to one farm plot, internal zoning) rather than
+  real neighborhood development. Deliberately has no content override (unlike every other
+  rule) — testing showed 331 already-excluded plans in these same councils already
+  contained a nominal "positive signal" keyword (שכונ/תוספת יח"ד/מתחם) and were rejected
+  anyway. `mitar` was evaluated and explicitly excluded from the blocklist: it has a
+  genuine open neighborhood candidate (`652-0754705`, "חורה - שכונה 27", in the Bedouin
+  town of Hura). Applied once: 1,464 committee candidates auto-excluded.
+- **ENERGY_RULE regex broadened** to also catch `אגרו וולטאי` (agro-voltaic), not just
+  `פוטו.?וולט` (photo-voltaic) — see `docs/BUG_REFERENCE.md`. 7 mavat + 3 committee
+  candidates caught on the same run.
 
 ## 2026-07-19/21 — 106(ב) detection, sanity backstop, R3/name-rule fixes, repo-hygiene pass
 
