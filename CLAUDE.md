@@ -169,6 +169,27 @@ at root because the task passes `projects.db` as its output argument.
 
 ## Session History
 
+- **2026-08-01 (session B) — Applied both pending decisions exports, added R7 auto-rule**
+  - Applied `docs/mavat_review_decisions (6).json`/`(7).json` (11,905 and 20,673
+    decisions, the second a cumulative superset) via `apply_review.py`: 32,052
+    exclusions, 443 kept-plan entries, 38 vault-notices dismissed, 5 status-changes
+    approved and written to the vault. One approved change, `503-1487552` (Givatayim,
+    פועלי הרכבת), couldn't be written — its `תכנית:: 503-1487552` line wasn't found in
+    that vault file — left pending for manual follow-up rather than guessed at.
+    `projects.db` refreshed afterward (10,710 projects / 12,332 events).
+  - Mined manual-exclusion comments across both files for new auto-rule candidates
+    (same method as R6 on 2026-07-22). Added **R7** (mavat-only, `auto_rules.py`):
+    Umm al-Fahm/Baqa al-Gharbiyya/Jatt (עירון regional council) now need either "שכונ"
+    in the name or a confirmed 100+ unit count to stay open — same shape as the
+    existing Bedouin-town rule (R2) but a higher, checkable bar (real `units` column,
+    not just the `units_ge10` boolean). Evidence: 319 excluded vs. 4 kept, all 4 kept
+    matching that bar. Applied once: 7 candidates excluded.
+  - A second candidate pattern (single-lot rural kibbutz/moshav rejections, 11
+    occurrences across 8 regional councils) was found but **not** turned into a rule —
+    user's explicit call: too thin to generalize without inventing a regional-council
+    list from outside the actual review history, unlike R6's real per-council counts.
+    Left as a manual review pattern for now.
+
 - **2026-07-26 → 2026-08-01 — Complot frontend-link overrides (21 municipalities) +
   two site_id registry bugs found and fixed**
   - **21 new Complot frontend-link overrides** added to `COMPLOT_MUNI_LINK_OVERRIDES`

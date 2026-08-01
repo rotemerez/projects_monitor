@@ -6,6 +6,26 @@ Living task-tracking document. Newest section on top. Check items off as they la
 
 ---
 
+## Active — R7 Arab-town unit-threshold rule — BUILT 2026-08-01
+
+- [x] Read both untracked `docs/mavat_review_decisions (6/7).json` exports (11,905 and
+      20,673 decisions) looking for new auto-rule candidates; applied both via
+      `apply_review.py` (already covered in the section above — no separate task).
+- [x] **R7 (new, mavat-only)**: Umm al-Fahm/Baqa al-Gharbiyya/Jatt (all under the "עירון"
+      regional council) get the same "neighborhood-scale only" treatment as the existing
+      Bedouin-town rule (R2), but with a HIGHER confirmed-unit bar (100, not 10) — found
+      from 319 excluded vs. 4 kept (all 4 kept had "שכונ" in the name or a confirmed 100+
+      unit count) plus explicit comments ("like bedouin munis, ignore point plans",
+      "לא מעוניין בתכניות עם פחות מ-100 יח\"ד בישובים ערביים"). `ARAB_COUNCIL_LOCATIONS`/
+      `ARAB_COUNCIL_UNIT_THRESHOLD` in `auto_rules.py`. Applied once: 7 candidates excluded.
+- [x] A parallel "rural single-lot in a kibbutz/moshav" pattern (11 occurrences across 8
+      different regional councils) was found but deliberately NOT turned into a rule —
+      user decision: too thin/scattered to generalize without inventing a regional-council
+      list from outside the actual review history (unlike R6, which read real per-council
+      rejection counts). Left as a manual review pattern; revisit if it accumulates more.
+
+---
+
 ## Active — Complot link overrides + site_id registry fixes — BUILT 2026-07-26 to 08-01
 
 - [x] Added 21 new Complot frontend-link overrides (`COMPLOT_MUNI_LINK_OVERRIDES` in

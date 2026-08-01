@@ -42,6 +42,21 @@ Round-3 rule (2026-07-22, committee-only):
      the comment above BLOCKED_COMMITTEE_MUNIS for why. `mitar` was evaluated and kept OUT
      of this list (has a genuine open neighborhood candidate in Hura).
 
+Round-4 rule (2026-08-01, mavat-only):
+  R7 Arab-town regional councils, higher unit bar — same shape as R2 (Bedouin), but for
+     Umm al-Fahm/Baqa al-Gharbiyya/Jatt (all under the "עירון" regional council): derived
+     from repeated manual rejections in mavat_review_decisions exports (319 excluded vs.
+     4 kept; all 4 kept plans had "שכונ" in the name or a confirmed unit count). Comments
+     were explicit: "like bedouin munis, ignore point plans", "לא מעוניין בתכניות עם
+     פחות מ-100 יח\"ד בישובים ערביים" — a HIGHER bar than R2's implicit 10, since even
+     multi-unit single-building additions are common there and not wanted. Two other
+     Arab-town locations (מבוא העמקים, הגליל המזרחי) each had only a single occurrence —
+     too thin to include confidently, left out for now. A parallel "rural single-lot in a
+     kibbutz/moshav" pattern was also found (11 occurrences across 8 different regional
+     councils) but was deliberately NOT turned into a rule — too thin/scattered to
+     generalize safely without inventing a regional-council list from outside your own
+     review history (unlike R6, which read real per-council rejection counts).
+
 NOTE (2026-07-15): a batch of ~84 candidates with status "הכנת הודעה 77/78" (§77-78
 pre-planning notice) were manually rejected on 2026-07-14, and it briefly looked like a
 good auto-rule candidate. It is NOT: the user rejected those specific ones because they'd
@@ -143,6 +158,14 @@ BLOCKED_COMMITTEE_MUNIS = {
     "harel", "hagalil lower",
 }
 
+# R7 (mavat-only, 2026-08-01): Arab towns under the "עירון" regional council (Umm al-Fahm,
+# Baqa al-Gharbiyya, Jatt) — same logic as BEDOUIN_TOWNS (only neighborhood-scale plans are
+# of interest) but a HIGHER confirmed-unit bar (100, not 10) since even sizeable single-
+# building additions are common there and not wanted. See the module docstring for the
+# evidence (319 excluded vs. 4 kept, all 4 kept containing "שכונ" or a confirmed 100+ count).
+ARAB_COUNCIL_LOCATIONS = ["עירון"]
+ARAB_COUNCIL_UNIT_THRESHOLD = 100
+
 # R4 (committee-only, 2026-07-14): standard local-plan number shape is NNN-NNNNNNN
 # (e.g. 603-1218759). Anything else — תמ"א/תמ"ל/תת"ל national plans, old municipal
 # numbering like בי/857/שופרסל or חל/1/ד-22 — is out of scope at the committee level;
@@ -154,7 +177,7 @@ TEST_ROW_RX = re.compile(r"בדיקה|ני?סיון|^(\d)\1{3,}$")
 
 
 def classify(name, location, status, units_ge10, units_rule, explanation=None,
-             confirmed=False, commercial_signal=None):
+             confirmed=False, commercial_signal=None, units=None):
     """Shared content-based classification (R1/R2/R3/energy). Returns a rule label or None.
 
     `explanation` (mavat_discovery.db only, via mavat_discover_units.py's detail fetch) is
@@ -193,6 +216,10 @@ def classify(name, location, status, units_ge10, units_rule, explanation=None,
             return label
     if any(t in loc for t in BEDOUIN_TOWNS):
         return "יישוב בדואי - לא תכנית שכונה"
+    if any(t in loc for t in ARAB_COUNCIL_LOCATIONS):
+        if confirmed and units is not None and units >= ARAB_COUNCIL_UNIT_THRESHOLD:
+            return None
+        return 'יישוב ערבי (עירון) - דורש 100+ יח"ד או שכונה'
     return None
 
 
@@ -209,19 +236,21 @@ def apply_to_mavat(dry_run, units_rule):
     expl_col = ", explanation" if "explanation" in cols else ", NULL"
     units_at_col = ", units_at" if "units_at" in cols else ", NULL"
     comm_col = ", commercial_signal" if "commercial_signal" in cols else ", NULL"
+    units_n_col = ", units" if "units" in cols else ", NULL"
     cur.execute(f"""SELECT plan, name, location, status{units_col}{expl_col}{units_at_col}
-                           {comm_col} FROM discovered
+                           {comm_col}{units_n_col} FROM discovered
                     WHERE target_status=1 AND in_vault=0 AND excluded=0
                       AND COALESCE(kept,0)=0""")
     rows = cur.fetchall()
     hits = {}
-    for plan, name, location, status, units_ge10, explanation, units_at, commercial_signal in rows:
+    for plan, name, location, status, units_ge10, explanation, units_at, commercial_signal, units_n in rows:
         rule = None
         if TEST_ROW_RX.search(name or "") or TEST_ROW_RX.match(plan or ""):
             rule = "רשומת בדיקה/דמה"
         else:
             rule = classify(name, location, status, units_ge10, units_rule, explanation,
-                            confirmed=units_at is not None, commercial_signal=commercial_signal)
+                            confirmed=units_at is not None, commercial_signal=commercial_signal,
+                            units=units_n)
         if rule:
             hits[plan] = rule
 

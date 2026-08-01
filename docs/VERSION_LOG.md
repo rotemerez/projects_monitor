@@ -6,6 +6,35 @@ Release / change history, newest on top.
 
 ---
 
+## 2026-08-01 — R7 Arab-town unit-threshold auto-rule
+
+- Applied both untracked `docs/mavat_review_decisions (6).json`/`(7).json` exports
+  (11,905 and 20,673 decisions, cumulative — the second is a superset) via
+  `apply_review.py`: 32,052 exclusions, 443 kept-plan entries, 38 vault-notices dismissed,
+  5 status-changes approved and written to the vault (one, `503-1487552`, skipped — plan
+  text not found in its vault file, left for manual follow-up). `projects.db` refreshed
+  afterward (10,710 projects / 12,332 events).
+- Mined the manual-exclusion comments (state=excluded with no automatic reason) across
+  both files for new auto-rule candidates, the same way R6 was found on 2026-07-22.
+  Two real patterns surfaced; only one was well-evidenced enough to codify:
+  - **R7 (new, mavat-only)**: Umm al-Fahm/Baqa al-Gharbiyya/Jatt (all under the "עירון"
+    regional council) — 319 excluded vs. 4 kept, all 4 kept containing "שכונ" in the name
+    or a confirmed 100+ unit count. Comments were explicit: "like bedouin munis, ignore
+    point plans", "לא מעוניין בתכניות עם פחות מ-100 יח\"ד בישובים ערביים". Implemented as
+    the same shape as the existing Bedouin-town rule (R2) but with a higher, checkable bar
+    (100 confirmed units via the real `units` column, not just the `units_ge10` boolean —
+    threaded through `apply_to_mavat`/`classify()` in `auto_rules.py`). Two other
+    Arab-town locations (מבוא העמקים, הגליל המזרחי) had only one occurrence each — left
+    out, too thin to generalize. Applied once: 7 candidates excluded.
+  - **Rural single-lot pattern (NOT implemented)**: 11 manual rejections of single-lot/
+    single-unit rights additions inside a kibbutz/moshav, spread across 8 different
+    regional councils (2 or fewer each) not covered by the R6 blocklist. User explicitly
+    declined to generalize this into a rule — a location-list approach would mean
+    inventing a regional-council list from general knowledge rather than reading it off
+    real per-council rejection counts (unlike R6). Left as a manual pattern.
+
+---
+
 ## 2026-08-01 — Yeruham Complot link override
 
 - Confirmed the `iron` frontend-link pattern (`/binyan/#taba/<internal-id>`) for
