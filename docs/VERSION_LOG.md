@@ -1,8 +1,253 @@
 # Version Log
 
-**Last Updated:** 2026-07-22
+**Last Updated:** 2026-08-01
 
 Release / change history, newest on top.
+
+---
+
+## 2026-08-01 — Yeruham Complot link override
+
+- Confirmed the `iron` frontend-link pattern (`/binyan/#taba/<internal-id>`) for
+  `yeruham` (`handasa.yeroham.muni.il/binyan/#taba/307`); added to the `iron`-pattern
+  batch list in `run_committee_sweep.py`. Backfilled all 49 existing rows in
+  `committee_state.db` and regenerated `mavat_review.html`.
+
+---
+
+## 2026-08-01 — Yavne Complot link override
+
+- Added an eleventh Complot frontend-link template (`_YAVNE_LINK` in
+  `run_committee_sweep.py`): `/taba2/`, keyed by plan number via `GetTabaByNumber` like
+  `bnei brak`/`givatayim`/`hod hasharon`. Registered for `"yavne"`. Backfilled all 67
+  existing rows in `committee_state.db` and regenerated `mavat_review.html`.
+
+---
+
+## 2026-08-01 — Tzefat registry fix + full Complot site_id verification sweep
+
+- Re-opened the Tzefat/Emek HaYarden finding from 2026-07-31 (previously misjudged as
+  "not a bug") after pulling all 79 `committee_state.db` rows tagged `muni='tzefat'` and
+  finding every one was genuinely Jordan Valley content, one literally titled "תכנית
+  אסטרטגית למרחב תכנון עמק הירדן." Confirmed Complot site_id 12 truly belongs to Emek
+  HaYarden (its own domain declares that value itself, independent of the registry).
+- Ran a full probe of all 69 Complot-system registry entries in
+  `local_committee_scrapers` — fetched each municipality's own domain and read the
+  `var site_id = N` its real plan-search widget declares (static HTML string, no browser
+  needed). Learned that several municipalities' `/binyan/` pages are uncustomized
+  copy-pasted demo content showing a different real client's site_id verbatim, which
+  would have produced false-positive "fixes" if trusted blindly. After the user
+  independently verified each flagged case against real `GetTabaByAuthority`/
+  `GetBakashotByInterestedParty` search URLs on each site, only Tzefat's registry entry
+  was actually wrong; `hagalil lower`, `ganei tikva`, `yavne`, `nazareth`,
+  `menashe alona`, `nahariya`, `yoqne'am illit`, `bnei brak`, `givatayim`, and `ariel`
+  were all already correct.
+- **Fix**: corrected `dispatcher.py`'s `"tzefat"` site_id (12 -> 88, user-confirmed).
+  Retagged 76 `committee_state.db` rows from `tzefat` to `emeq hayarden` (3 were already
+  duplicates there), reset `tzefat`'s scrape timestamp, regenerated `mavat_review.html`
+  (21,701 open candidates).
+
+---
+
+## 2026-07-31 — Tira/Hagalil Center site_id collision fixed
+
+- Found (user report: "many showing tira but being in the north") and confirmed a
+  site_id collision in `local_committee_scrapers`'s own registry: `"tira"` and
+  `"hagalil center"` were both registered with `site_id: 20`, so every "tira" scrape was
+  actually re-fetching Hagalil Center's backend under the wrong label — all 240
+  `committee_state.db` rows tagged `muni='tira'` were exact plan-number duplicates of the
+  240 correct `hagalil center` rows.
+  - Deleted the 240 duplicate rows and reset `tira`'s `last_scraped_at` in this project's
+    `committee_state.db`; regenerated `mavat_review.html`.
+  - User found Tira's real site_id (24) and it's now corrected in
+    `local_committee_scrapers/unified_scraper/municipal_scraper/registry/dispatcher.py`.
+    Tira will scrape its own real data on its next rotation turn.
+  - Also checked plan `214-0907980` (Tzefat vs. Emek HaYarden) — not a bug, different
+    root cause (Tzefat's own site_id correctly matches; likely inter-municipal committee
+    jurisdiction, not a data error). See `docs/BUG_REFERENCE.md` for detail.
+
+---
+
+## 2026-07-30 — Tiberias Complot link override
+
+- Confirmed the `iron` frontend-link pattern (`/binyan/#taba/<internal-id>`) for
+  `tiberias` (`tiberias.complot.co.il/binyan/#taba/2046`); added to the `iron`-pattern
+  batch list in `run_committee_sweep.py`. Backfilled all 81 existing rows in
+  `committee_state.db` and regenerated `mavat_review.html`.
+
+---
+
+## 2026-07-30 — Sdot Dan Complot link override
+
+- Confirmed the `iron` frontend-link pattern (`/binyan/#taba/<internal-id>`) for
+  `sdot dan` (`sdan.complot.co.il/binyan/#taba/1850`); added to the `iron`-pattern batch
+  list in `run_committee_sweep.py`. Backfilled all 96 existing rows in
+  `committee_state.db` and regenerated `mavat_review.html`.
+
+---
+
+## 2026-07-30 — Sderot Complot link override
+
+- Confirmed the `iron` frontend-link pattern (`/binyan/#taba/<internal-id>`) for `sderot`
+  (`sderot.complot.co.il/binyan/#taba/19264`); added to the `iron`-pattern batch list in
+  `run_committee_sweep.py`. Backfilled all 68 existing rows in `committee_state.db` and
+  regenerated `mavat_review.html`.
+
+---
+
+## 2026-07-30 — Saronim Complot link override
+
+- Confirmed Saronim reuses the existing `kfar saba`/`ofaqim`/`qiryat gat`/`ramat hasharon`
+  template (`/newengine/Pages/taba2.aspx#taba/<internal-id>`):
+  `www.sharonim.org.il/newengine/Pages/taba2.aspx#taba/5953`. Registered `"saronim"` in
+  `COMPLOT_MUNI_LINK_OVERRIDES` (no new lambda). Backfilled all 96 existing rows in
+  `committee_state.db` and regenerated `mavat_review.html`.
+
+---
+
+## 2026-07-30 — Rishon LeZion Complot link override
+
+- Added a tenth Complot frontend-link template (`_RISHON_LEZION_LINK` in
+  `run_committee_sweep.py`): same `taba2.aspx` page as `kfar saba`, but on the
+  municipality's own domain (`www.rishonlezion.muni.il`) rather than the registry's
+  `rishonlezion.complot.co.il` — a hardcoded-domain override like `givatayim`.
+  Registered for `"rishon lezion"`. Backfilled all 589 existing rows in
+  `committee_state.db` and regenerated `mavat_review.html`.
+
+---
+
+## 2026-07-30 — Rehovot Complot link override
+
+- Confirmed the `iron` frontend-link pattern (`/binyan/#taba/<internal-id>`) for
+  `rechovot` (`rechovot.complot.co.il/binyan/#taba/5443`); added to the `iron`-pattern
+  batch list in `run_committee_sweep.py`. Backfilled all 252 existing rows in
+  `committee_state.db` and regenerated `mavat_review.html`.
+
+---
+
+## 2026-07-30 — Ramat Hasharon Complot link override
+
+- Confirmed Ramat Hasharon reuses the existing `kfar saba`/`ofaqim`/`qiryat gat` template
+  (`/newengine/Pages/taba2.aspx#taba/<internal-id>`):
+  `ramathasharon.complot.co.il/newengine/pages/taba2.aspx#taba/3164`. Registered
+  `"ramat hasharon"` in `COMPLOT_MUNI_LINK_OVERRIDES` (no new lambda). Backfilled all 240
+  existing rows in `committee_state.db` and regenerated `mavat_review.html`.
+
+---
+
+## 2026-07-30 — Ramat Gan Complot link override
+
+- Confirmed the `iron` frontend-link pattern (`/binyan/#taba/<internal-id>`) for
+  `ramat gan` (`handasa.ramat-gan.muni.il/binyan/#taba/4207`); added to the `iron`-pattern
+  batch list in `run_committee_sweep.py`. Backfilled all 146 existing rows in
+  `committee_state.db` and regenerated `mavat_review.html`.
+
+---
+
+## 2026-07-30 — Rahat Complot link override
+
+- Confirmed the `iron` frontend-link pattern (`/binyan/#taba/<internal-id>`) for `rahat`
+  (`rahat.complot.co.il/binyan/#taba/1440`); added to the `iron`-pattern batch list in
+  `run_committee_sweep.py`. Backfilled all 158 existing rows in `committee_state.db` and
+  regenerated `mavat_review.html`.
+
+---
+
+## 2026-07-30 — Raanana Complot link override
+
+- Added a ninth Complot frontend-link template (`_RAANANA_LINK` in
+  `run_committee_sweep.py`): keyed by internal id via `#taba/<n>` like
+  `iron`/`nahariya`/`petah tikva`, but on the municipality's own domain at
+  `/residents/engineering/planning-information/tba/#taba/<n>`. Registered for
+  `"raanana"`. Backfilled all 34 existing rows in `committee_state.db` and regenerated
+  `mavat_review.html`.
+
+---
+
+## 2026-07-30 — Qiryat Malakhi Complot link override
+
+- Confirmed the `iron` frontend-link pattern (`/binyan/#taba/<internal-id>`) for
+  `qiryat malakhi` (`km.complot.co.il/binyan/#taba/3808`); added to the `iron`-pattern
+  batch list in `run_committee_sweep.py`. Backfilled all 24 existing rows in
+  `committee_state.db` and regenerated `mavat_review.html`.
+
+---
+
+## 2026-07-30 — Qiryat Gat Complot link override
+
+- Confirmed Qiryat Gat reuses the existing `kfar saba`/`ofaqim` template
+  (`/newengine/Pages/taba2.aspx#taba/<internal-id>`):
+  `qiryat-gat.complot.co.il/newengine/Pages/taba2.aspx#taba/100634`. Registered
+  `"qiryat gat"` in `COMPLOT_MUNI_LINK_OVERRIDES` (no new lambda). Backfilled all 119
+  existing rows in `committee_state.db` and regenerated `mavat_review.html`.
+
+---
+
+## 2026-07-29 — Petah Tikva Complot link override
+
+- Added an eighth Complot frontend-link template (`_PETAH_TIKVA_LINK` in
+  `run_committee_sweep.py`): keyed by internal id via `#taba/<n>` like `iron`/`nahariya`,
+  but on the municipality's own domain at
+  `/engineering/planning-and-building/taba2#taba/<n>`. Registered for `"petah tikva"`.
+  Backfilled 349 of 383 existing rows in `committee_state.db` (34 had no backend link to
+  begin with) and regenerated `mavat_review.html`.
+
+---
+
+## 2026-07-28 — Or Yehuda Complot link override
+
+- Confirmed the `iron` frontend-link pattern (`/binyan/#taba/<internal-id>`) for
+  `or yehuda` (`oryehuda.complot.co.il/binyan/#taba/836`); added to the `iron`-pattern
+  batch list in `run_committee_sweep.py`. Backfilled all 28 existing rows in
+  `committee_state.db` and regenerated `mavat_review.html`.
+
+---
+
+## 2026-07-28 — Ofaqim Complot link override
+
+- Confirmed Ofaqim reuses the existing `kfar saba` template
+  (`/newengine/Pages/taba2.aspx#taba/<internal-id>`):
+  `ofaqim.complot.co.il/newengine/Pages/taba2.aspx#taba/839`. Registered `"ofaqim"` in
+  `COMPLOT_MUNI_LINK_OVERRIDES` (no new lambda). Backfilled all 131 existing rows in
+  `committee_state.db` and regenerated `mavat_review.html`.
+
+---
+
+## 2026-07-26 — Nahariya Complot link override
+
+- Added a seventh Complot frontend-link template (`_NAHARIYA_LINK` in
+  `run_committee_sweep.py`): keyed by internal id via `#taba/<n>` like `iron`, but on the
+  municipality's own domain with a Hebrew path segment (`/תכניות-בנין-עיר/`) instead of
+  `iron`'s `/binyan/`. Registered for `"nahariya"`. Backfilled all 73 existing rows in
+  `committee_state.db` and regenerated `mavat_review.html`.
+
+---
+
+## 2026-07-26 — Mordot Carmel Complot link override
+
+- Confirmed the `iron` frontend-link pattern (`/binyan/#taba/<internal-id>`) for
+  `mordot carmel` (`www.mordotcarmel.org/binyan/#taba/1822`); added to the `iron`-pattern
+  batch list in `run_committee_sweep.py`. Backfilled all 94 existing rows in
+  `committee_state.db` and regenerated `mavat_review.html`.
+
+---
+
+## 2026-07-22 — Modi'in Complot link override
+
+- Confirmed the `iron` frontend-link pattern (`/binyan/#taba/<internal-id>`) for `modi'in`
+  (`modiin.complot.co.il/binyan/#taba/4362`); added to the `iron`-pattern batch list in
+  `run_committee_sweep.py`. Backfilled all 213 existing rows in `committee_state.db` and
+  regenerated `mavat_review.html`.
+
+---
+
+## 2026-07-22 — Migdal Ha'emeq Complot link override
+
+- Added a sixth Complot frontend-link template (`_MIGDAL_HAEMEQ_LINK` in
+  `run_committee_sweep.py`): `iron`'s `/binyan/` page path, but keyed by plan number via
+  `GetTabaByNumber` like `bnei brak`/`givatayim`/`hod hasharon`. Registered for
+  `"migdal ha'emeq"`. Backfilled all 64 existing rows in `committee_state.db` and
+  regenerated `mavat_review.html` (14,513 open candidates).
 
 ---
 

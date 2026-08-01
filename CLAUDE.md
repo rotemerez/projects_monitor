@@ -24,9 +24,11 @@ status current by querying מנהל התכנון.
   canonical stage code, with `is_current`), `tenders` (~2,426), `signatures` (~7,131),
   `value_history` (~2,354). The redundant `projects_from_notes.db` (a strict subset) was
   removed. `status_events.is_current` is the natural Mavat diff target. See `docs/SCHEMAS.md`.
-- **Mavat scraper** (`mavat_scraper/`): working prototype. **Verdict: headless Playwright
-  works** against the WAF; search-only extraction returns status + status code + date per plan.
-  Concurrency test and polite rate-limiting still pending. See `docs/MAVAT_AUTOMATION.md`.
+- **Mavat scraper** (`mavat_scraper/`): DONE and scheduled (`MavatStatusDiff`, daily 07:00).
+  **Verdict: headless Playwright works** against the WAF; search-only extraction returns
+  status + status code + date per plan. Concurrency test (3 parallel contexts, clean pass,
+  0 non-200s) and polite rate-limiting (`--delay`, `--rotate 300`) done 2026-07-08. See
+  `docs/MAVAT_AUTOMATION.md`.
 
 ## Active Documentation
 
@@ -166,6 +168,52 @@ at root because the task passes `projects.db` as its output argument.
   `docs/MAVAT_AUTOMATION.md` for detail.
 
 ## Session History
+
+- **2026-07-26 → 2026-08-01 — Complot frontend-link overrides (21 municipalities) +
+  two site_id registry bugs found and fixed**
+  - **21 new Complot frontend-link overrides** added to `COMPLOT_MUNI_LINK_OVERRIDES`
+    (`committee_scraper/run_committee_sweep.py`), each backfilled into existing
+    `committee_state.db` rows and confirmed against a real user-supplied backend/frontend
+    link pair: Migdal Ha'emeq, Modi'in, Mordot Carmel, Nahariya, Ofaqim, Or Yehuda, Petah
+    Tikva, Qiryat Gat, Qiryat Malakhi, Raanana, Rahat, Ramat Gan, Ramat Hasharon, Rehovot,
+    Rishon LeZion, Saronim, Sderot, Sdot Dan, Tiberias, Yavne, Yeruham. Six of these
+    needed a brand-new lambda (a previously-unseen page-path template); the rest reused
+    an existing one (`iron`'s `/binyan/#taba/<id>` or `kfar saba`'s
+    `/newengine/Pages/taba2.aspx#taba/<id>`). Full template catalog and reasoning is
+    inline in `run_committee_sweep.py`'s comments above `COMPLOT_MUNI_LINK_OVERRIDES`.
+  - **Tira/Hagalil Center site_id collision** (found from a user report: "many showing
+    tira but being in the north"): `local_committee_scrapers`'s own registry had both
+    `"tira"` and `"hagalil center"` registered with the identical Complot `site_id: 20`,
+    so every "tira" scrape was silently just re-fetching Hagalil Center's backend under
+    the wrong label — confirmed all 240 `committee_state.db` rows tagged `muni='tira'`
+    were exact plan-number duplicates of the already-correct `hagalil center` rows. User
+    found Tira's real site_id (24) by reading a live search URL off Tira's own site;
+    corrected `dispatcher.py`, deleted the 240 duplicates, reset `tira`'s scrape
+    timestamp.
+  - **Tzefat/Emek HaYarden mislabeling** (same root-cause family, found on a closer look
+    at plan `214-0907980`): all 79 rows tagged `muni='tzefat'` turned out to be genuine
+    Jordan Valley content (one literally titled "תכנית אסטרטגית למרחב תכנון עמק הירדן")
+    — Tzefat's registered site_id (12) actually belongs to Emek HaYarden. User found
+    Tzefat's real site_id (88); corrected `dispatcher.py`, retagged 76 rows to
+    `emeq hayarden` (3 were already duplicates there), reset `tzefat`'s scrape timestamp.
+  - **Systemic verification sweep**: rather than keep finding these one at a time, wrote
+    a one-off probe (no browser needed — the real site_id is a static
+    `<script>var site_id = N;</script>` string on each municipality's own plan-search
+    page) across all 69 Complot-system registry entries. Key gotcha found along the way:
+    several municipalities' `/binyan/` pages are uncustomized copy-pasted WordPress demo
+    content showing a *different, unrelated* real client's site_id verbatim (e.g.
+    several showed Emek HaYarden's own value, one showed Taibeh's, one showed Bat Yam's)
+    — a trap for any naive "trust the first site_id you find" automation. After the user
+    cross-checked each flagged case against real search URLs on each site, only Tira and
+    Tzefat's registry entries were actually wrong; ten other candidates (`hagalil lower`,
+    `ganei tikva`, `yavne`, `nazareth`, `menashe alona`, `nahariya`, `yoqne'am illit`,
+    `bnei brak`, `givatayim`, `ariel`) were already correct.
+  - Also answered a one-off data query: found 111 vault-tracked plans where the
+    Government/National Authority for Urban Renewal is (co-)developer, and broke down
+    how many are actually confirmed live on Mavat (37) vs. local/pre-filing-only (25:
+    20 תמ"ל-track, 5 with no plan number at all) vs. formatted like a real number but
+    not yet confirmed by the scraper's rotation (49).
+  - Full per-municipality detail in `docs/BUG_REFERENCE.md` / `docs/VERSION_LOG.md`.
 
 - **2026-07-22 — R6 regional-council blocklist, energy-rule fix**
   - Reviewed `docs/mavat_review_decisions (6).json` (11,905 decisions) specifically to

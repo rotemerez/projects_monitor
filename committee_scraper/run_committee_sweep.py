@@ -108,6 +108,46 @@ _HOD_HASHARON_LINK = lambda base, site_id, n, plan_number: (
 # givatayim despite sharing that page). Two registry keys ("kfar saba" and "ksaba") point at
 # the same domain/site_id — both get this override.
 _KFAR_SABA_LINK = lambda base, site_id, n, plan_number: f"{base}/newengine/Pages/taba2.aspx#taba/{n}"
+# found 2026-07-26 by user — a SEVENTH distinct template: keyed by internal id via
+# #taba/<n> like iron, but a different page path (own municipal domain, Hebrew path
+# segment) rather than iron's /binyan/. Confirmed: www.nahariya.muni.il/
+# תכניות-בנין-עיר/#taba/1291.
+_NAHARIYA_LINK = lambda base, site_id, n, plan_number: f"{base}/תכניות-בנין-עיר/#taba/{n}"
+# found 2026-07-29 by user — an EIGHTH distinct template: keyed by internal id via
+# #taba/<n> like iron/nahariya, but yet another own-domain page path. Confirmed:
+# www.petah-tikva.muni.il/engineering/planning-and-building/taba2#taba/8106.
+_PETAH_TIKVA_LINK = lambda base, site_id, n, plan_number: (
+    f"{base}/engineering/planning-and-building/taba2#taba/{n}"
+)
+# found 2026-07-30 by user — a NINTH distinct template: keyed by internal id via
+# #taba/<n> like iron/nahariya/petah tikva, but yet another own-domain page path.
+# Confirmed: www.raanana.muni.il/residents/engineering/planning-information/tba/#taba/5606.
+_RAANANA_LINK = lambda base, site_id, n, plan_number: (
+    f"{base}/residents/engineering/planning-information/tba/#taba/{n}"
+)
+# found 2026-07-30 by user — a TENTH distinct template: keyed by internal id via
+# #taba/<n>, same taba2.aspx page as kfar saba, but on the municipality's own domain
+# (www.rishonlezion.muni.il) rather than the registry's rishonlezion.complot.co.il —
+# `base` (muni_url) is ignored here, like givatayim. Confirmed: www.rishonlezion.muni.il/
+# Residents/Construction/newengine/Pages/taba2.aspx#taba/14903.
+_RISHON_LEZION_LINK = lambda base, site_id, n, plan_number: (
+    "https://www.rishonlezion.muni.il/Residents/Construction/newengine/Pages/taba2.aspx"
+    f"#taba/{n}"
+)
+# found 2026-08-01 by user — an ELEVENTH distinct template: /taba2/ (not the
+# /newengine/Pages/taba2.aspx family), keyed by plan NUMBER via GetTabaByNumber like
+# bnei brak/givatayim/hod hasharon. Confirmed: yavne.complot.co.il/taba2/
+# #search/GetTabaByNumber&siteid=87&n=404-0506931&l=true&arguments=siteid,n,l.
+_YAVNE_LINK = lambda base, site_id, n, plan_number: (
+    f"{base}/taba2/#search/GetTabaByNumber&siteid={site_id}&n={plan_number}&l=true&arguments=siteid,n,l"
+)
+# found 2026-07-22 by user — a SIXTH distinct template: same page path as iron (/binyan/)
+# but keyed by plan NUMBER via GetTabaByNumber (like bnei brak/givatayim/hod hasharon),
+# not iron's #taba/<internal-n-id>. Confirmed working: migdal-haemeq.complot.co.il/binyan/
+# #search/GetTabaByNumber&siteid=8&n=221-1051697&l=true&arguments=siteid,n,l.
+_MIGDAL_HAEMEQ_LINK = lambda base, site_id, n, plan_number: (
+    f"{base}/binyan/#search/GetTabaByNumber&siteid={site_id}&n={plan_number}&l=true&arguments=siteid,n,l"
+)
 
 COMPLOT_MUNI_LINK_OVERRIDES = {
     "iron": _IRON_LINK,
@@ -116,13 +156,36 @@ COMPLOT_MUNI_LINK_OVERRIDES = {
     "hod hasharon": _HOD_HASHARON_LINK,
     "kfar saba": _KFAR_SABA_LINK,
     "ksaba": _KFAR_SABA_LINK,
+    "migdal ha'emeq": _MIGDAL_HAEMEQ_LINK,
+    "nahariya": _NAHARIYA_LINK,
+    # found 2026-07-28 by user — same template as kfar saba (/newengine/Pages/taba2.aspx
+    # #taba/<internal-id>): ofaqim.complot.co.il/newengine/Pages/taba2.aspx#taba/839.
+    "ofaqim": _KFAR_SABA_LINK,
+    "petah tikva": _PETAH_TIKVA_LINK,
+    # found 2026-07-30 by user — same template as kfar saba/ofaqim
+    # (/newengine/Pages/taba2.aspx#taba/<internal-id>):
+    # qiryat-gat.complot.co.il/newengine/Pages/taba2.aspx#taba/100634.
+    "qiryat gat": _KFAR_SABA_LINK,
+    "raanana": _RAANANA_LINK,
+    # found 2026-07-30 by user — same template as kfar saba/ofaqim/qiryat gat
+    # (/newengine/Pages/taba2.aspx#taba/<internal-id>):
+    # ramathasharon.complot.co.il/newengine/pages/taba2.aspx#taba/3164.
+    "ramat hasharon": _KFAR_SABA_LINK,
+    "rishon lezion": _RISHON_LEZION_LINK,
+    # found 2026-07-30 by user — same template as kfar saba/ofaqim/qiryat gat/
+    # ramat hasharon (/newengine/Pages/taba2.aspx#taba/<internal-id>):
+    # www.sharonim.org.il/newengine/Pages/taba2.aspx#taba/5953.
+    "saronim": _KFAR_SABA_LINK,
+    "yavne": _YAVNE_LINK,
 }
 for _muni in ("bat yam", "be'er sheva", "beit shean", "beit shemesh", "betar illit",
               "biq'at beit hakerem", "dimona", "efrat", "eilat", "emeq hayarden",
               "galil east", "ganei tikva", "giv'ot alonim", "hagalil center",
               "hagalil lower", "hagilboa", "haifa", "herzliya", "hevel eilot",
               "karnei shomron", "kfar yona", "kiryat ata", "lev hasharon",
-              "ma'ale hagalil", "ma'ale hermon", "ma'alot-tarshiha"):
+              "ma'ale hagalil", "ma'ale hermon", "ma'alot-tarshiha", "modi'in",
+              "mordot carmel", "or yehuda", "qiryat malakhi", "rahat", "ramat gan",
+              "rechovot", "sderot", "sdot dan", "tiberias", "yeruham"):
     COMPLOT_MUNI_LINK_OVERRIDES[_muni] = _IRON_LINK
 
 

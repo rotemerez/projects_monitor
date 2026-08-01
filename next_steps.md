@@ -1,8 +1,30 @@
 # Next Steps — Projects Vault → DB & Mavat Automation
 
-**Last Updated:** 2026-07-22
+**Last Updated:** 2026-08-01
 
 Living task-tracking document. Newest section on top. Check items off as they land.
+
+---
+
+## Active — Complot link overrides + site_id registry fixes — BUILT 2026-07-26 to 08-01
+
+- [x] Added 21 new Complot frontend-link overrides (`COMPLOT_MUNI_LINK_OVERRIDES` in
+      `run_committee_sweep.py`), each backfilled into `committee_state.db` and confirmed
+      against a real link pair: Migdal Ha'emeq, Modi'in, Mordot Carmel, Nahariya, Ofaqim,
+      Or Yehuda, Petah Tikva, Qiryat Gat, Qiryat Malakhi, Raanana, Rahat, Ramat Gan,
+      Ramat Hasharon, Rehovot, Rishon LeZion, Saronim, Sderot, Sdot Dan, Tiberias, Yavne,
+      Yeruham.
+- [x] Fixed two Complot `site_id` registry collisions in `local_committee_scrapers`
+      (`registry/dispatcher.py`): Tira (was colliding with Hagalil Center at site_id 20;
+      real value 24) and Tzefat (was actually serving Emek HaYarden's data at site_id 12;
+      real value 88). Cleaned up the resulting mislabeled rows in `committee_state.db`.
+- [x] Ran a full verification probe across all 69 Complot-system registry entries to
+      confirm no other collisions exist (only Tira/Tzefat were wrong).
+- [ ] Tira has not yet been rescraped with its corrected site_id — once
+      `CommitteeSweep` picks it up again, get a real plan link pair and add its frontend
+      override (path is likely `/newengine/Pages/taba2.aspx`, per its homepage nav link,
+      but per this project's own rule that needs a confirmed working example first).
+- [ ] Full detail in `docs/VERSION_LOG.md` / `docs/BUG_REFERENCE.md`.
 
 ---
 
